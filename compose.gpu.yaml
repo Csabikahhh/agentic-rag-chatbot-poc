@@ -1,0 +1,19 @@
+# Opt-in NVIDIA GPU for the ollama service. Merge it on top of compose.yaml:
+#   docker compose -f compose.yaml -f compose.gpu.yaml up --build
+# To make it the default for a checkout, set COMPOSE_FILE in .env, e.g.
+#   COMPOSE_FILE=compose.yaml:compose.gpu.yaml   (use ; as separator on Windows)
+#
+# Needs an NVIDIA driver and GPU support in Docker: Docker Desktop with the WSL 2
+# backend on Windows, or the NVIDIA Container Toolkit on Linux. Without them the
+# ollama service fails to start with this file; use compose.yaml alone and Ollama
+# runs on the CPU. The ollama log lists the GPU it detected at startup:
+#   docker compose logs ollama
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

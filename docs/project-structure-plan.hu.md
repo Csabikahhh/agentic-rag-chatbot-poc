@@ -3,6 +3,8 @@
 [English](project-structure-plan.md) | **Magyar**
 
 > **Állapot:** javaslat, 2026. 10. 01. Ez a dokumentum a repository *vázát* és a felépítés sorrendjét tervezi meg. A részletes tervezés (konkrét promptok, metrikák, chunkméretek) a megvalósítás során dől el, és a [README](../README.hu.md)-ben, valamint a `docs/` mappa többi dokumentumában rögzítjük.
+>
+> **Haladás:** az 1. fázis 2026. 10. 01-jén elkészült. Vele együtt előre hoztuk a 6. fázis konténeres környezetét (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) és az 5.7. szakasz közös moduljait (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), valamint az állapotsémákat, a Streamlit felület vázát és a 2–8. fázis típusannotált vázait. Következik a 8–9. döntés, majd a 2. fázis. A részletek a [8. szakaszban](#8-felépítési-sorrend) olvashatók, a tervtől való eltérések pedig a [12. szakaszban](#12-eltérések-a-tervtől).
 
 ## Tartalom
 
@@ -17,6 +19,7 @@
 9. [Követelmények nyomon követése](#9-követelmények-nyomon-követése)
 10. [Konvenciók](#10-konvenciók)
 11. [Kockázatok és nyitott kérdések](#11-kockázatok-és-nyitott-kérdések)
+12. [Eltérések a tervtől](#12-eltérések-a-tervtől)
 
 ## 1. Cél és hatókör
 
@@ -263,14 +266,19 @@ A `.env.example` (verziókezelt) minden változót dokumentál; a `.env` gitigno
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama` vagy `fake` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Compose-on belül `http://ollama:11434`, a gépen futó Ollamához `http://host.docker.internal:11434` |
-| `OLLAMA_MODEL` | *(4. döntés)* | chatmodell tag |
-| `EMBEDDING_MODEL` | *(5. döntés)* | Hugging Face modellazonosító |
+| `OLLAMA_MODEL` | `qwen2.5:7b-instruct` *(4. döntés, ideiglenes)* | chatmodell tag |
+| `LLM_TEMPERATURE` | `0.0` | mintavételi hőmérséklet, 0,0–2,0 *(új)* |
+| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` vagy `fake` (offline, hash-alapú embedding, modell-letöltés nélkül) *(új)* |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` *(5. döntés, ideiglenes)* | Hugging Face modellazonosító |
 | `CHROMA_DIR` | `data/chroma_db` | az index helye |
+| `CHROMA_COLLECTION` | `documents` | a Chroma kollekció neve *(új)* |
 | `DATA_DIR` | `data/raw` | a korpusz helye |
 | `TOP_K` | `4` | visszakeresési mélység |
 | `MAX_RETRIES` | `2` | az ellenőrzés → újratervezés ciklus korlátja |
-| `INGEST_ON_START` | `true` | a konténer indulásakor felépíti az indexet, ha hiányzik |
+| `INGEST_ON_START` | `true` | a konténer indulásakor felépíti az indexet, ha hiányzik (amíg a 6. fázis belépési pontja el nem készül, nincs hatása) |
 | `LOG_LEVEL` | `INFO` | |
+
+*(új)*: az alapok építése közben került be. Minden értéket induláskor ellenőrzünk (például `TOP_K` ≥ 1, `MAX_RETRIES` ≥ 0, az `LLM_TEMPERATURE` 0,0 és 2,0 között, valamint a Chroma kollekciónevekre vonatkozó szabályai); az üres érték az alapértéket jelenti, az `agentic-rag config` pedig kiírja az érvényes értékeket. A teljes referencia az [architecture.md](architecture.md#configuration-reference) fájlban található (angolul).
 
 Futtatási módok:
 
@@ -279,6 +287,8 @@ Futtatási módok:
 | `fake` | szkriptelt fake | semmit | egységtesztek, CI, UI-fejlesztés, válaszidő-alapvonal LLM nélkül |
 | `ollama-host` | Ollama Windowson (már telepítve) | `ollama serve` | gyors helyi fejlesztés |
 | `ollama-compose` | Ollama konténer | Docker | a reprodukálható út, amelyet az értékelők futtatnak |
+
+A teljesen offline fake mód az `EMBEDDING_PROVIDER=fake` beállítást is használja; az alapértelmezett `huggingface` providerrel az embedding modell az első használatkor letöltődik. Az `ollama-compose` módban az `app` szolgáltatás `OLLAMA_BASE_URL` értékét maga a `compose.yaml` állítja be.
 
 ## 7. Konténerizálási terv
 
@@ -307,6 +317,19 @@ Minden fázis olyan commitolt állapottal zárul, amely átmegy a saját „kés
 | **7. Funkcionális értékelés** | `data/eval/questions.jsonl` (10–20), `evaluation/*`, `eval` parancs, `docs/evaluation.md`, README-szakasz | A `python -m agentic_rag eval` kiírja az eredményeket és az összefoglalót; a következtetések a README-ben vannak |
 | **8. Terheléses teszt** | `loadtest/runner.py`, `loadtest` parancs, `docs/performance.md`, README-szakasz | A `python -m agentic_rag loadtest --requests 100 --concurrency 4` kiírja a percentiliseket és a node-onkénti bontást; a szűk keresztmetszet és 1–2 javaslat dokumentálva |
 | **9. Dokumentáció és finomítás** | README angolul + magyarul kész, a követelménylista kipipálva, opcionális CI workflow, záró tiszta-klón teszt | Egy értékelő minden állítást reprodukálni tud a dokumentált parancsokkal |
+
+Haladás 2026. 10. 01-jén:
+
+- **0. fázis:** részben kész. Az 1–7. döntés szerepel a README *Tervezési döntések* táblázatában (a 4. és az 5. ideiglenes alapértelmezéssel), a 8. és a 9. döntés még nyitott, és elkészült a `docs/architecture.md` csonk.
+- **1. fázis:** kész. Mind a négy „kész, ha” ellenőrzése teljesül, és a `--help` kilistázza az `ingest`, `eval`, `loadtest`, `export-graph` és `config` parancsot.
+- **Előre hozva** az alapokba, a saját fázisuk előtt megépítve és tesztelve:
+  - a 6. fázisból: a `Dockerfile`, a `compose.yaml`, a `compose.gpu.yaml` GPU override és a README futtatási útmutatója. A képfájl felépül, és az `app` szolgáltatás fake módban egészséges (healthy) állapotban fut. A 6. fázisban marad: a belépési pont az opcionális adatbetöltéssel (`INGEST_ON_START`), valamint a teljes stack futtatása friss klónból, letöltött modellel és felépített indexszel;
+  - az 5.7. szakasz közös moduljai: `config.py`, `llm.py` (`ChatOllama` és a szkriptelt fake modell; a fake szabályai a valódi promptokhoz a 4. fázisban készülnek), `embeddings.py` (sentence-transformers és egy offline fake) és `tracing.py`;
+  - a 3–4. fázisból: az állapotsémák (`rag/state.py`, `agent/state.py`) és a `search_knowledge_base` eszköz interfésze;
+  - az 5. fázisból: a Streamlit felület váza (`ui/app.py`, `ui/components.py`) az `AppTest` tesztjeivel a `tests/test_ui.py` fájlban; az 5. fázisban marad az ellenőrzés a valódi gráffal;
+  - a 2., 7. és 8. fázisból: azok az adatsémák és tiszta segédfüggvények, amelyekre ezek a fázisok építenek: a dokumentum- és chunk-metaadatok, a darabolás alapértékei és az `IndexStats`; a kérdésbetöltő, a hit@k, a routing-pontosság és a riportmodellek; a válaszidő-statisztikák.
+- **Vázak:** a 2–8. fázis minden más publikus függvénye a végleges szignatúrájával létezik, és `NotImplementedError` kivételt dob ezzel az üzenettel: `<qualified name> is planned for Phase <N> (see docs/project-structure-plan.md, section 8)`. Ezek az üzenetek és a tesztek az angol terv e szakaszára hivatkoznak, ezért a szakasz száma és a fázisok számozása maradjon változatlan.
+- **Megjegyzés a 4. fázishoz:** az `export-graph` parancs már létezik (`--graph`, `--format`, `--output`), és kirajzolja a gráfokat, amint elkészülnek. Teljes Markdown fájlt ír, ezért a kimenetét a `docs/architecture.md`-be kell bemásolni vagy külön fájlba írni; az `--output` kapcsolót nem szabad a kézzel írt dokumentumra irányítani.
 
 ## 9. Követelmények nyomon követése
 
@@ -346,3 +369,45 @@ Minden fázis olyan commitolt állapottal zárul, amely átmegy a saját „kés
 - **A kis modellek magyar nyelvi minősége**: ha a korpusz és a kérdések magyarok, kifejezetten többnyelvű lefedettségű modellt érdemes választani, és az értékelő készleten ellenőrizni, mielőtt véglegesítjük.
 - **A korpusz licence**: csak olyan dokumentumot commitolunk, amelynek licence engedi a továbbterjesztést; egyébként letöltő parancs kell, a forrás-URL-ek rögzítésével.
 - **Nyitott**: a végleges domain és korpusz (8. döntés), a nem visszakeresési eszköz (9. döntés), a UI nyelve, és hogy megéri-e egy FastAPI szolgáltatást harmadik Compose komponensként hozzáadni a valósághűbb terheléses teszthez.
+
+## 12. Eltérések a tervtől
+
+Az alapok építése közben rögzítve (2026. 10. 01.). A fenti szakaszok az eredeti tervet őrzik; ahol eltérnek, a kód és ez a lista az irányadó.
+
+### 12.1 Konfiguráció (6. szakasz)
+
+- Három új beállítás: `LLM_TEMPERATURE`, `EMBEDDING_PROVIDER` (`huggingface` vagy `fake`, hogy a tesztekhez és a modell nélküli bemutatókhoz ne kelljen embedding modellt letölteni) és `CHROMA_COLLECTION` (a Chroma névszabályai szerint ellenőrizve).
+- Az `INGEST_ON_START` létezik, de még nincs hatása: induláskor semmi sem tölt be adatot, amíg el nem készül a 6. fázis belépési pontja, amelyhez a 2. fázis `build_index` függvénye kell. A UI nem tölt be adatot, hogy könnyű maradjon az indulása.
+- A chunkméret és az átfedés kódbeli konstans (`ChunkingConfig`: 900 karakter 150 karakteres átfedéssel, az 5.4. szakasz tartományán belül), nem beállítás.
+
+### 12.2 Közös modulok és sémák (5.1–5.3. és 5.7. szakasz)
+
+- A trace-eseményeket a `@traced` node-dekorátor rögzíti, amely minden node állapotfrissítéséhez hozzáfűzi őket, ahelyett hogy a streamből állnának elő. Így az állapotban utaznak: az `invoke` eredménye a teljes trace-t tartalmazza, a RAG algráf eseményeivel együtt, amelyeket a `run_rag_subtask` továbbít. A `TraceEvent` a tervezett mezőkön túl `duration_ms` és `metadata` mezőt is kapott.
+- A `search_knowledge_base` nem `@tool` függvény, hanem `BaseTool` alosztály, amely a lefordított RAG algráfot tárolja, `response_format="content_and_artifact"` beállítással (a modellnek a kontextus, az alkalmazásnak a teljes `RagOutput`), mert a gráf építésekor létrejövő függőségre van szüksége. A `run_rag_subtask` ezen az eszközön át hívja az algráfot, ezért a `get_graph(xray=True)` nem ágyazza be az algráfot a fő diagramba: az `export-graph` külön diagramként rajzolja ki, és a 9. szakaszban hivatkozott Mermaid export is így mutatja.
+- Az `analyze_request` a `direct` úton a `draft_answer` mezőt, a `single` és a `tool` úton egy egylépéses `subtasks` tervet is ír. A `plan_subtasks` minden tervezési kör elején `Overwrite`-tal nullázza a `subtask_results` listát, így az újratervezés nem keveri bele az elutasított kör eredményeit.
+- Az állapotok `total=False` beállítású `TypedDict`-ek explicit be- és kimeneti sémával (`AgentInput` és `AgentOutput`, `RagInput` és `RagOutput`); a `RagState` `trace` kulcsot is kapott.
+- A fake LLM szabálymotor (`ScriptedChatModel`: sorrendezett reguláris kifejezések, JSON strukturált kimenet); a valódi promptokhoz tartozó szabályai a 4. fázisban készülnek. Az `EMBEDDING_PROVIDER=fake` a tervezett sentence-transformers modell mellé offline embedding fake-et ad (hash-elt szózsák).
+- Az értékelő elem `id`, `tags` és `notes` mezőt is kapott, az ismeretlen kulcsokat pedig elutasítja. A terheléses teszt statisztikái a minimumot is jelentik, a bemelegítő kéréseket pedig külön összesítik.
+
+### 12.3 UI (5.5. szakasz)
+
+- A UI a `stream_mode=["updates", "values"]` (`version="v2"`) beállítással streamel, nem csak `"updates"` módban: az updates részek a lépéspanelt töltik, az utolsó gyökérszintű values rész adja a választ és a forrásokat. A lépéspanel a fő gráf saját lépéseit mutatja; a RAG algráf belső lépései nem szerepelnek benne, az eredménye a visszakeresett kontextus paneljén jelenik meg.
+- Az oldalsáv csak olvashatóan mutatja a providert, a modelleket és a top-k értéket. Ezek környezeti változókkal vagy a `.env` fájllal és újraindítással módosíthatók, nem vezérlőelemekkel.
+
+### 12.4 Konténerek (7. szakasz)
+
+- A `.dockerignore` engedélylista (allowlist): mindent kizár, majd visszaengedi a `pyproject.toml`, `uv.lock`, `.python-version`, `README.md`, `LICENSE` fájlokat és az `src/` mappát.
+- A képfájlok pontos tagekre vannak rögzítve: `python:3.12.14-slim-trixie`, `ghcr.io/astral-sh/uv:0.12.6` és `ollama/ollama:0.35.0`. Belépési szkript még nincs, csak `CMD`.
+- Az Ollama portja nincs publikálva a gépre, mert a gépen már futhat Ollama a 11434-es porton, és az API-nak nincs hitelesítése; egy helyi, gitignore-olt `compose.override.yaml` publikálhatja.
+- A GPU-támogatás override fájl (`compose.gpu.yaml`), nem `gpu` profil: egy profil teljes szolgáltatásokat kapcsol, ezért egy második `ollama` szolgáltatás kellene hozzá, a `depends_on` pedig nem mutathat két szolgáltatás egyikére.
+- Az `app` szolgáltatás a `./data` helyett csak a `./data/raw` mappát csatolja, csak olvashatóan, az index pedig a `chroma-data` nevesített volume-ban van. Ezért az `eval` és a `loadtest` a gépen fut, vagy egy további `./data/eval` csatolással.
+- A Compose számára a `.env` opcionális (`required: false`). A `compose.yaml` az `LLM_PROVIDER`, `EMBEDDING_PROVIDER` és `OLLAMA_MODEL` értéket a shellből vagy a `.env`-ből veszi át, az `OLLAMA_BASE_URL` értékét pedig az `ollama` szolgáltatásra rögzíti.
+- Az `ollama-pull` az `ollama show … || ollama pull …` parancsot futtatja, így csak a hiányzó modellt tölti le, az `app` pedig az `ollama` egészséges állapotát is megvárja.
+- A modell nélküli indítás: `LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps app`. A `--no-deps` nélkül a Compose az Ollama szolgáltatásokat is elindítaná, az `EMBEDDING_PROVIDER=fake` nélkül pedig letöltődne az embedding modell.
+- Az embedding modellt a build nem tölti le előre; ez továbbra is opcionális.
+
+### 12.5 Eszközök és dokumentáció
+
+- A ruff kihagyja a `.claude/` mappát (harmadik féltől származó ágens- és skillfájlok), és nem formázza a `docs/*.md` fájlokat, amelyek kódrészletei szemléltető jellegűek.
+- Az alapok tesztjei az általuk lefedett modulokról kapták a nevüket (`test_config.py` … `test_ui.py`). A 4. szakasz tesztfájljai (`test_ingestion.py`, `test_rag_subgraph.py`, `test_agent_graph.py`, `test_tools.py`) a saját fázisukkal érkeznek; a UI `AppTest` tesztjei a `tests/test_ui.py` fájlban vannak, nem a `test_ui_smoke.py`-ban.
+- A 10. szakasz generált diagramokat kér. Amíg a 3–4. fázis meg nem építi a gráfokat, a `docs/architecture.md` kézzel rajzolt, ennek megfelelően jelölt céldiagramokat tartalmaz.

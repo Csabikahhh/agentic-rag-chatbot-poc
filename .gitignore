@@ -1,5 +1,10 @@
+# Directory patterns that are also common package or corpus folder names
+# (build, dist, env, venv, models, task) start with a slash: they match only at
+# the repository root and never hide paths such as src/agentic_rag/models/ or
+# data/raw/build/. Caches, secrets and model weights match at any depth.
+
 # Assignment brief (local only)
-task/
+/task/
 
 # Python
 __pycache__/
@@ -7,14 +12,14 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-dist/
+/build/
+/dist/
 *.egg-info/
 .eggs/
 *.egg
 .venv/
-venv/
-env/
+/venv/
+/env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -27,16 +32,23 @@ htmlcov/
 .env.*
 !.env.example
 
-# Streamlit
-.streamlit/secrets.toml
+# Streamlit secrets. Streamlit also reads the .streamlit/ folder next to the
+# main script (src/agentic_rag/ui/), so the pattern matches at any depth.
+**/.streamlit/secrets.toml
+
+# Docker Compose: local overrides, merged automatically by `docker compose` (see compose.yaml)
+compose.override.yaml
+compose.override.yml
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Local model weights and vector stores
+# Local model weights and vector stores. chroma_db/ matches at any depth:
+# CHROMA_DIR resolves against the working directory, so an index can appear
+# outside data/, and no source or corpus folder uses that name.
 *.gguf
 *.bin
-models/
+/models/
 chroma_db/
 .chroma/
 

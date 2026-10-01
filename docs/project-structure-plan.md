@@ -3,6 +3,8 @@
 **English** | [Magyar](project-structure-plan.hu.md)
 
 > **Status:** proposal, written 2026-10-01. This document plans the *skeleton* of the repository and the order in which to build it. Detailed design (exact prompts, metrics, chunk sizes) is decided while building and recorded in the [README](../README.md) and the other documents in `docs/`.
+>
+> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. Next: decisions 8–9, then Phase 2. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
 
 ## Contents
 
@@ -17,6 +19,7 @@
 9. [Requirement traceability](#9-requirement-traceability)
 10. [Conventions](#10-conventions)
 11. [Risks and open questions](#11-risks-and-open-questions)
+12. [Deviations from the plan](#12-deviations-from-the-plan)
 
 ## 1. Goal and scope
 
@@ -263,14 +266,19 @@ One Streamlit entrypoint. Chat with `st.chat_message` / `st.chat_input`; a live 
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama` or `fake` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | `http://ollama:11434` inside Compose, `http://host.docker.internal:11434` for a host Ollama |
-| `OLLAMA_MODEL` | *(decision 4)* | chat model tag |
-| `EMBEDDING_MODEL` | *(decision 5)* | Hugging Face model id |
+| `OLLAMA_MODEL` | `qwen2.5:7b-instruct` *(decision 4, provisional)* | chat model tag |
+| `LLM_TEMPERATURE` | `0.0` | sampling temperature, 0.0–2.0 *(added)* |
+| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` or `fake` (offline hashing embeddings, no model download) *(added)* |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` *(decision 5, provisional)* | Hugging Face model id |
 | `CHROMA_DIR` | `data/chroma_db` | index location |
+| `CHROMA_COLLECTION` | `documents` | Chroma collection name *(added)* |
 | `DATA_DIR` | `data/raw` | corpus location |
 | `TOP_K` | `4` | retrieval depth |
 | `MAX_RETRIES` | `2` | bound on the verify → re-plan loop |
-| `INGEST_ON_START` | `true` | build the index if it is missing when the container starts |
+| `INGEST_ON_START` | `true` | build the index if it is missing when the container starts (no effect until the Phase 6 entrypoint exists) |
 | `LOG_LEVEL` | `INFO` | |
+
+*(added)*: introduced while building the foundation. Every value is validated at start-up (for example `TOP_K` ≥ 1, `MAX_RETRIES` ≥ 0, `LLM_TEMPERATURE` between 0.0 and 2.0, and Chroma's rules for collection names); an empty value means the default, and `agentic-rag config` prints the effective values. The full reference is in [architecture.md](architecture.md#configuration-reference).
 
 Run modes:
 
@@ -279,6 +287,8 @@ Run modes:
 | `fake` | scripted fake | nothing | unit tests, CI, UI development, latency baseline without the LLM |
 | `ollama-host` | Ollama on Windows (already installed) | `ollama serve` | fast local development |
 | `ollama-compose` | Ollama container | Docker | the reproducible path reviewers run |
+
+Fully offline fake mode also sets `EMBEDDING_PROVIDER=fake`; with the default `huggingface` provider the embedding model is downloaded on first use. In the `ollama-compose` mode, `compose.yaml` sets `OLLAMA_BASE_URL` for the `app` service itself.
 
 ## 7. Containerization plan
 
@@ -307,6 +317,19 @@ Each phase ends in a committed state that passes its "done when" check. Phases 6
 | **7. Functional evaluation** | `data/eval/questions.jsonl` (10–20), `evaluation/*`, `eval` command, `docs/evaluation.md`, README section | `python -m agentic_rag eval` writes the results and the summary; conclusions are in the README |
 | **8. Load test** | `loadtest/runner.py`, `loadtest` command, `docs/performance.md`, README section | `python -m agentic_rag loadtest --requests 100 --concurrency 4` prints percentiles and the per-node breakdown; bottleneck and 1–2 proposals documented |
 | **9. Docs and polish** | README EN + HU complete, requirement checklist ticked, optional CI workflow, final clean-clone test | A reviewer can reproduce every claim with the documented commands |
+
+Progress on 2026-10-01:
+
+- **Phase 0** is partly done: decisions 1–7 are in the README *Design decisions* table (4 and 5 with provisional defaults), decisions 8 and 9 are still open, and the `docs/architecture.md` stub exists.
+- **Phase 1** is done: its four checks pass, and `--help` lists `ingest`, `eval`, `loadtest`, `export-graph` and `config`.
+- **Brought forward** into the foundation, built and tested ahead of their phases:
+  - from Phase 6: the `Dockerfile`, `compose.yaml`, the GPU override `compose.gpu.yaml` and the README run guide. The image builds and the `app` service runs healthy in fake mode. Still in Phase 6: the entrypoint with the optional ingestion (`INGEST_ON_START`) and the fresh-clone run of the full stack, with the model pulled and the index built;
+  - the shared modules of section 5.7: `config.py`, `llm.py` (`ChatOllama` and the scripted fake model; the fake's rules for the real prompts stay in Phase 4), `embeddings.py` (sentence-transformers and an offline fake) and `tracing.py`;
+  - from Phases 3–4: the state contracts (`rag/state.py`, `agent/state.py`) and the interface of the `search_knowledge_base` tool;
+  - from Phase 5: the Streamlit shell (`ui/app.py`, `ui/components.py`) with its `AppTest` tests in `tests/test_ui.py`; still in Phase 5: the check against the real graph;
+  - from Phases 2, 7 and 8: the data contracts and pure helpers they build on: the document and chunk metadata, the chunking defaults and `IndexStats`; the question-set loader, hit@k, routing accuracy and the report models; the latency statistics.
+- **Skeletons:** every other public function of Phases 2–8 exists with its final signature and raises `NotImplementedError` with the message `<qualified name> is planned for Phase <N> (see docs/project-structure-plan.md, section 8)`. These messages and the tests cite this section, so keep its number and the phase numbers stable.
+- **Phase 4 note:** the `export-graph` command already exists (`--graph`, `--format`, `--output`) and draws the graphs once they are built. It writes a complete Markdown file, so its output is pasted into `docs/architecture.md`, or written to a file of its own, rather than pointing `--output` at the hand-written document.
 
 ## 9. Requirement traceability
 
@@ -346,3 +369,45 @@ Each phase ends in a committed state that passes its "done when" check. Phases 6
 - **Hungarian quality of small models**: if the corpus and questions are Hungarian, prefer a model with explicit multilingual coverage and verify it on the evaluation set before committing to it.
 - **Corpus licensing**: only commit documents whose license allows redistribution; otherwise ship a download command and record the source URLs.
 - **Open**: the final domain and corpus (decision 8), the non-retrieval tool (decision 9), the UI language, and whether a FastAPI service is worth adding as a third Compose component for a more realistic load test.
+
+## 12. Deviations from the plan
+
+Recorded while building the foundation (2026-10-01). The sections above keep the original plan; where they differ, the code and this list are current.
+
+### 12.1 Configuration (section 6)
+
+- Three settings were added: `LLM_TEMPERATURE`, `EMBEDDING_PROVIDER` (`huggingface` or `fake`, so tests and model-free demos need no embedding download) and `CHROMA_COLLECTION` (validated with Chroma's naming rules).
+- `INGEST_ON_START` exists but has no effect yet: nothing ingests at start-up until the Phase 6 entrypoint, which needs Phase 2's `build_index`. The UI does not ingest, to keep its start-up light.
+- Chunk size and overlap are code constants (`ChunkingConfig`: 900 characters with a 150-character overlap, inside the range of section 5.4), not settings.
+
+### 12.2 Shared modules and contracts (sections 5.1–5.3 and 5.7)
+
+- Trace events are recorded by the `@traced` node decorator, which appends them to each node's state update, instead of being derived from the stream. They therefore travel in the state: an `invoke` result carries the whole trace, including the RAG subgraph's events, which `run_rag_subtask` forwards. `TraceEvent` also has `duration_ms` and `metadata`.
+- `search_knowledge_base` is a `BaseTool` subclass that holds the compiled RAG subgraph, with `response_format="content_and_artifact"` (the context for a model, the whole `RagOutput` for the application), rather than an `@tool` function, because it needs a dependency built at graph-build time. `run_rag_subtask` calls the subgraph through this tool, so `get_graph(xray=True)` does not nest the subgraph in the main diagram: `export-graph` draws it as a diagram of its own, which is also what the Mermaid export cited in section 9 shows.
+- `analyze_request` also writes `draft_answer` on the `direct` route and a one-step `subtasks` plan on the `single` and `tool` routes. `plan_subtasks` resets `subtask_results` with `Overwrite` at the start of every planning round, so a re-plan does not mix in the rejected round's results.
+- The states are `TypedDict`s with `total=False` and explicit input and output schemas (`AgentInput` and `AgentOutput`, `RagInput` and `RagOutput`); `RagState` also has a `trace` key.
+- The fake LLM is a rule engine (`ScriptedChatModel`: ordered regular expressions, JSON structured output); its rules for the real prompts come in Phase 4. `EMBEDDING_PROVIDER=fake` adds an offline embedding fake (a hashed bag of words) next to the planned sentence-transformers model.
+- The evaluation item also has `id`, `tags` and `notes`, and unknown keys are rejected. The load-test statistics also report the minimum, and the warm-up requests are summarized separately.
+
+### 12.3 UI (section 5.5)
+
+- The UI streams with `stream_mode=["updates", "values"]` (`version="v2"`) instead of `"updates"` alone: the updates feed the step panel, and the last root values give the answer and the sources. The step panel lists the main graph's own steps; the RAG subgraph's inner steps are not listed, and its result appears in the retrieved-context panel.
+- The sidebar shows the provider, the models and top-k read-only. They are changed through environment variables or `.env` and a restart, not through widgets.
+
+### 12.4 Containers (section 7)
+
+- `.dockerignore` is an allowlist: everything is excluded, then `pyproject.toml`, `uv.lock`, `.python-version`, `README.md`, `LICENSE` and `src/` are re-included.
+- The images are pinned to exact tags: `python:3.12.14-slim-trixie`, `ghcr.io/astral-sh/uv:0.12.6` and `ollama/ollama:0.35.0`. There is no entrypoint script yet, only `CMD`.
+- The Ollama port is not published on the host, because the host may already run Ollama on 11434 and the API has no authentication; a local, gitignored `compose.override.yaml` can publish it.
+- GPU support is an override file, `compose.gpu.yaml`, instead of a `gpu` profile: a profile switches whole services, so it would need a second `ollama` service, and `depends_on` cannot point at either of two services.
+- The `app` service mounts `./data/raw` read-only instead of `./data`, and the index lives in the named volume `chroma-data`. `eval` and `loadtest` therefore run on the host, or with an extra `./data/eval` mount.
+- `.env` is optional for Compose (`required: false`). `compose.yaml` passes `LLM_PROVIDER`, `EMBEDDING_PROVIDER` and `OLLAMA_MODEL` from the shell or `.env`, and fixes `OLLAMA_BASE_URL` to the `ollama` service.
+- `ollama-pull` runs `ollama show … || ollama pull …`, so it downloads only a missing model, and `app` also waits for `ollama` to be healthy.
+- The model-free start is `LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps app`: without `--no-deps` Compose would also start the Ollama services, and without `EMBEDDING_PROVIDER=fake` the embedding model would be downloaded.
+- The embedding model is not pre-downloaded at build time; this stays optional.
+
+### 12.5 Tooling and documentation
+
+- Ruff skips `.claude/` (third-party agent and skill files) and does not format `docs/*.md`, whose code snippets are illustrative.
+- The foundation's tests are named after the modules they cover (`test_config.py` … `test_ui.py`). The test files of section 4 (`test_ingestion.py`, `test_rag_subgraph.py`, `test_agent_graph.py`, `test_tools.py`) come with their phases; the `AppTest` tests of the UI are in `tests/test_ui.py` rather than `test_ui_smoke.py`.
+- Section 10 asks for generated diagrams. Until Phases 3–4 build the graphs, `docs/architecture.md` holds hand-drawn target diagrams, labelled as such.

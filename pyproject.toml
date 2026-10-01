@@ -1,0 +1,96 @@
+[project]
+name = "agentic-rag-chatbot-poc"
+version = "0.1.0"
+description = "Agentic RAG chatbot prototype: LangGraph workflow, modular RAG subgraph, local open-source LLM and Streamlit UI."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Csaba Ovari" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "langchain-chroma>=1.1.0",
+    "langchain-core>=1.6.6",
+    "langchain-huggingface>=1.2.2",
+    "langchain-ollama>=1.1.0",
+    "langchain-text-splitters>=1.1.2",
+    "langgraph>=1.2.12",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "sentence-transformers>=6.1.0",
+    "streamlit>=1.57",
+    "torch>=2.14.1",
+]
+
+[project.scripts]
+agentic-rag = "agentic_rag.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_rag"]
+
+# PyTorch is only needed for the local embedding model. The GPU is reserved for
+# Ollama, so torch always comes from the CPU-only index (much smaller wheels).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+# Claude Code agents and skills: third-party content, not project code.
+extend-exclude = [".claude"]
+
+[tool.ruff.format]
+# Ruff also formats the Python blocks in Markdown files. The design documents keep their
+# illustrative snippets (aligned comments, partial code) exactly as written.
+exclude = ["docs/*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "N",   # pep8-naming
+    "RUF", # ruff-specific rules
+    "D1",  # pydocstyle: a docstring on every public module, class and function (not tests)
+]
+# Allow typographic characters (en dash, arrows) in strings, comments and docstrings.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test names say what they check; docstrings in tests are optional.
+"tests/*" = ["D1"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentic_rag"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The live Ollama test is deselected by default, so `uv run pytest` stays offline. Run it with
+# `uv run pytest -m ollama`: the last -m option wins.
+addopts = '-ra --strict-markers -m "not ollama"'
+markers = [
+    "ollama: needs an Ollama server with the model; deselected by default, run with -m ollama",
+    "slow: slow tests, e.g. model downloads",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]

@@ -1,0 +1,57 @@
+# Build context for the Dockerfile in this directory.
+#
+# Allowlist: everything is excluded first and only the build inputs are
+# re-included, so new files (secrets, models, local data) stay out of the
+# context by default. This excludes, among others: .git, .github, .venv,
+# .claude/, task/, tests/, docs/, data/ (the corpus is bind-mounted at run time
+# and the Chroma index lives in a named volume, see compose.yaml), IDE folders,
+# .env files, .streamlit/ and the Docker files themselves.
+#
+# Adapted from the asset dockerignore-example of the docker-project-foundations
+# skill (https://github.com/docker/skills), licensed under the Apache License,
+# Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Modified for this
+# project: rewritten as an allowlist for a uv-based Python build.
+
+*
+
+# Build inputs. pyproject.toml declares readme = "README.md" and
+# license-files = ["LICENSE"], so building the project needs both files.
+!pyproject.toml
+!uv.lock
+!.python-version
+!README.md
+!LICENSE
+!src/
+
+# Never send these, even from inside a re-included path such as src/.
+
+# Python caches and build leftovers
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.ipynb_checkpoints/
+
+# Environment files, secrets and credentials
+**/.env
+**/.env.*
+**/.npmrc
+**/.pypirc
+**/.netrc
+**/*.pem
+**/*.key
+**/.streamlit/secrets.toml
+
+# Local vector stores and model weights
+**/chroma_db/
+**/.chroma/
+**/*.gguf
+
+# Editor and OS files
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+**/*~

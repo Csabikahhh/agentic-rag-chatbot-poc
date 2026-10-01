@@ -1,0 +1,106 @@
+# Local stack for the agentic RAG chatbot prototype: Streamlit UI (app) plus a
+# local LLM served by Ollama. The UI is published on http://localhost:8501 only.
+#
+# 1) Full stack. The first start pulls the chat model (several GB) into the
+#    ollama-data volume and downloads the embedding model into hf-cache:
+#      docker compose up --build
+#
+# 2) Model-free fake mode: scripted LLM and offline fake embeddings, no Ollama
+#    container, no model downloads:
+#      LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps app
+#    PowerShell:
+#      $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --build --no-deps app
+#
+# Optional:
+# - NVIDIA GPU for Ollama: docker compose -f compose.yaml -f compose.gpu.yaml up --build
+# - Ollama already running on the host instead of the ollama service:
+#     docker compose run --rm --no-deps --service-ports -e OLLAMA_BASE_URL=http://host.docker.internal:11434 app
+# - Settings: copy .env.example to .env (optional, never commit it). The shell
+#   or .env can override LLM_PROVIDER, EMBEDDING_PROVIDER and OLLAMA_MODEL here.
+#   OLLAMA_BASE_URL always points at the ollama service inside this stack.
+# - The Ollama API is not published on the host: the host may already run Ollama
+#   on 11434 and the API has no authentication. To reach it from the host, put
+#   this in a local compose.override.yaml (merged automatically):
+#     services:
+#       ollama:
+#         ports:
+#           - "127.0.0.1:11435:11434"
+# - Remove the containers and all downloaded models and indexes:
+#     docker compose down -v
+#
+# Portions adapted from the asset compose-dev.yaml of the
+# docker-project-foundations skill (https://github.com/docker/skills), licensed
+# under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0). Modified for this project.
+
+# Single pin for both Ollama services.
+x-ollama-image: &ollama-image ollama/ollama:0.35.0
+
+services:
+  ollama:
+    image: *ollama-image
+    volumes:
+      - ollama-data:/root/.ollama
+    # No ports: reachable as http://ollama:11434 on the Compose network only.
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+      start_interval: 2s
+    restart: unless-stopped
+
+  # One-shot: pulls the chat model unless the ollama-data volume already has it,
+  # so later starts work offline. Re-pull a model with
+  #   docker compose exec ollama ollama pull <model>
+  ollama-pull:
+    image: *ollama-image
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - ollama show "$$OLLAMA_MODEL" > /dev/null 2>&1 || ollama pull "$$OLLAMA_MODEL"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8501:8501" # Use 0.0.0.0 only when other devices need access
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-huggingface}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      # Corpus from the repository, read-only.
+      - ./data/raw:/app/data/raw:ro
+      # Chroma index and Hugging Face model cache survive container rebuilds.
+      # Paths match the Dockerfile (WORKDIR /app, HF_HOME).
+      - chroma-data:/app/data/chroma_db
+      - hf-cache:/home/app/.cache/huggingface
+    extra_hosts:
+      # For the host-Ollama option above. Docker Desktop resolves this name
+      # itself; Linux engines need the mapping (the host Ollama must then
+      # listen on the Docker bridge, not only on 127.0.0.1).
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  chroma-data:
+  hf-cache:
