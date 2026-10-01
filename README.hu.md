@@ -101,7 +101,7 @@ flowchart LR
 | Helyi LLM | Helyben kiszolgált, nyílt forráskódú modell, fizetős API-k nélkül |
 | Dokumentumindex | A választott szöveges adatforrás feldarabolt (chunking) és beágyazott (embedding) dokumentumai |
 
-A részletes céltervezés (a hét fő node és a routing, a RAG algráf négy lépése, az eszközök), az állapotsémák a kód jelenlegi állapota szerint, valamint a konfigurációs referencia a [docs/architecture.md](docs/architecture.md) fájlban található (angolul).
+A részletes céltervezés (a hét fő node és a routing, a RAG algráf négy lépése, az eszközök), az állapotsémák a kód jelenlegi állapota szerint, a modulokon átívelő szerződések (függőséginjektálás, végrehajtási modell, trace-események, az újratervezési ciklus, a hivatkozások számozása, hibák és kilépési kódok), valamint a konfigurációs referencia a [docs/architecture.md](docs/architecture.md) fájlban található (angolul).
 
 > 🚧 *Kitöltendő:* a fő workflow node-jai és routing logikája, a RAG algráf lépései, az eszközök, az állapot (state) sémája és az adatbetöltési (ingestion) folyamat.
 >
@@ -137,7 +137,7 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 
 **Lehetséges metrikák:** a válasz helyessége a referenciához képest, hűség a visszakeresett kontextushoz (faithfulness), visszakeresési találati arány (hit rate@k), valamint a routing és az eszközválasztás pontossága.
 
-**Már megvan:** az értékelő készlet formátuma (`data/eval/questions.jsonl`, kérdésenként egy JSON-objektum, amelyet az `agentic_rag.evaluation.dataset` ellenőriz) a [data/eval/README.md](data/eval/README.md) fájlban van leírva (angolul). A visszakeresési hit@k és a routing pontossága elkészült; az LLM által pontozott helyesség és faithfulness, a futtató és maguk a kérdések a 7. fázisban következnek. Az eredmények JSON-ként a `data/eval/results/` mappába kerülnek majd.
+**Már megvan:** az értékelő készlet formátuma (`data/eval/questions.jsonl`, kérdésenként egy JSON-objektum, amelyet az `agentic_rag.evaluation.dataset` ellenőriz) a [data/eval/README.md](data/eval/README.md) fájlban van leírva (angolul). Minden kérdés felsorolja az elvárt dokumentumait (`expected_documents`): a `DATA_DIR`-hez viszonyított, perjeles útvonalakat, ahogy az adatbetöltés azonosítja a dokumentumokat. A visszakeresési hit@k-t visszakeresési részfeladatonként számoljuk, a részfeladat chunkjainak rangsorolt dokumentumaiból (a riportban `retrieved_documents`, részfeladatonként egy lista), sosem a válasz deduplikált hivatkozásaiból. Az `eval --target node` azon node-ok egyikét értékeli, amelyeket egy kérdés önmagában meg tud hajtani (`NODE_TARGETS`: az `analyze_request` a routinghoz, a `run_rag_subtask` a visszakereséshez); más node-ot 2-es kilépési kóddal elutasít. A visszakeresési hit@k és a routing pontossága elkészült; az LLM által pontozott helyesség és faithfulness, a futtató és maguk a kérdések a 7. fázisban következnek. Az eredmények JSON-ként a `data/eval/results/` mappába kerülnek majd.
 
 > 🚧 *Kitöltendő:* az értékelő készlet helye, a pontozás módja, az eredmények, a levont következtetések és a reprodukálásukhoz szükséges parancs.
 
@@ -147,7 +147,7 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 
 **Mért értékek:** válaszidő (átlag, p50, p95, p99, maximum), áteresztőképesség és hibaarány, valamint node-onkénti válaszidő-bontás a fő szűk keresztmetszet azonosításához – ezt 1–2 konkrét optimalizálási javaslat követi.
 
-**Már megvan:** a válaszidő-statisztikák és a riport formátuma (`agentic_rag.loadtest.runner`). A percentiliseket a legközelebbi rangok közötti lineáris interpoláció adja (a `numpy.percentile` alapértelmezése), a bemelegítő kérések külön szerepelnek, és a node-onkénti részesedésnél a `run_rag_subtask` idejét nem szabad összeadni az általa futtatott RAG algráf node-okéval, mert azokat már tartalmazza. A futtató a 8. fázisban következik.
+**Már megvan:** a válaszidő-statisztikák és a riport formátuma (`agentic_rag.loadtest.runner`). A percentiliseket a legközelebbi rangok közötti lineáris interpoláció adja (a `numpy.percentile` alapértelmezése), a bemelegítő kérések külön szerepelnek, és a node-onkénti részesedésnél a `run_rag_subtask` idejét nem szabad összeadni az általa futtatott RAG algráf node-okéval, mert azokat már tartalmazza. A futtató a 8. fázisban következik: egyszer építi fel a gráfot, és egy `ThreadPoolExecutor(max_workers=concurrency)` szálain hívja a `graph.invoke`-ot, ugyanazon a szinkron úton, amelyet a UI és az értékelés is használ.
 
 > 🚧 *Kitöltendő:* az eredmények, a szűk keresztmetszet elemzése, az optimalizálási javaslatok és a reprodukálásukhoz szükséges parancs.
 
@@ -159,7 +159,7 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 - Helyi fejlesztéshez [uv](https://docs.astral.sh/uv/getting-started/installation/); a Python 3.12-t is telepíti, ha hiányzik.
 - A konténerekhez Docker és Docker Compose 2.24 vagy újabb (a `compose.yaml` az opcionális `env_file` szintaxist használja).
 - Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az ideiglenes alapértelmezett modell, a `qwen2.5:7b-instruct` (4 bites, kb. 4,7 GB) elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban (*a pontos RAM/VRAM-igény még nincs meghatározva*). A fake módhoz nem kell sem modell, sem GPU.
-- Lemezterület a teljes stackhez: az alkalmazás képfájlja (kb. 2,9 GB), az Ollama képfájlja és a chatmodell.
+- Lemezterület a teljes stackhez: az alkalmazás képfájlja (kb. 2,9 GB; mérve 2,88 GB), az Ollama képfájlja és a chatmodell.
 
 ### Ami már most működik
 
@@ -167,7 +167,7 @@ Az alapok végponttól végpontig futnak, de kérdésekre még nem válaszolnak:
 
 - a tesztek offline, a fake LLM-mel és a fake embeddinggel átmennek;
 - a parancssori felület kilistázza a parancsait, a `config` kiírja az érvényes beállításokat; az `ingest`, az `eval`, a `loadtest` és az `export-graph` kiírja, melyik fázisra van tervezve (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`), és 1-es kilépési kóddal áll le;
-- a Streamlit UI elindul, megjeleníti a konfigurációt, és minden kérdésre azzal az üzenettel felel, hogy az ágens a 4. fázisban készül el;
+- a Streamlit UI elindul, megjeleníti a konfigurációt, és minden kérdésre azzal az üzenettel felel, hogy az ágens a 4. fázisban készül el. A felhasználó által megállított futás a *Stopped before an answer was produced.* üzenetet kapja, az ágens az új kérdés mellett csak a korábbi megválaszolt kérdéseket kapja meg, a válaszok `$` jelei szövegként jelennek meg (LaTeX nélkül), érvénytelen beállítás vagy olvashatatlan `.env` esetén pedig a chat helyén *Invalid configuration* hiba áll;
 - a képfájl felépül, és az `app` szolgáltatás fake módban egészséges (healthy) állapotban indul.
 
 ### Helyi fejlesztés uv-vel
@@ -187,8 +187,8 @@ A repository klónozása és beállítása:
 ```bash
 git clone https://github.com/Csabikahhh/agentic-rag-chatbot-poc.git
 cd agentic-rag-chatbot-poc
-uv sync                                          # .venv Python 3.12-vel, a rögzített függőségekkel és a fejlesztői eszközökkel
-uv run pytest                                    # offline tesztek
+uv sync --locked                                 # .venv Python 3.12-vel, a rögzített függőségekkel és a fejlesztői eszközökkel
+uv run pytest                                    # offline tesztek; a végén: "... passed, 1 deselected"
 uv run ruff check .                              # lint
 uv run ruff format --check .                     # formázás
 uv run python -m agentic_rag --help              # a parancsok (vagy: uv run agentic-rag --help)
@@ -206,7 +206,9 @@ LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake uv run streamlit run src/agentic_rag/u
 $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run src/agentic_rag/ui/app.py
 ```
 
-A tesztek mindig fake módban futnak; a shell beállításait és a `.env` fájlt figyelmen kívül hagyják.
+Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fájlt, ha a lock fájl nem egyezik a `pyproject.toml`-lal; a képfájl buildje ugyanezt az ellenőrzést használja.
+
+A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `552 passed, 1 deselected` (2026. 10. 01-jén mérve; a sikeres tesztek száma a fázisokkal nő). Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 
@@ -214,6 +216,8 @@ A tesztek mindig fake módban futnak; a shell beállításait és a `.env` fájl
 ollama pull qwen2.5:7b-instruct
 uv run pytest -m ollama       # élő ellenőrzés a helyi szerverrel; kimarad, ha a szerver nem érhető el
 ```
+
+Az élő teszt a shell `OLLAMA_BASE_URL` és `OLLAMA_MODEL` értékét követi, így másik szervert vagy modellt is ellenőrizhet.
 
 ### Futtatás Docker Compose-zal
 
@@ -267,14 +271,26 @@ docker compose run --rm --no-deps --service-ports -e OLLAMA_BASE_URL=http://host
 docker compose run --rm --no-deps app agentic-rag config
 ```
 
-A stack csak a `data/raw` mappát csatolja, ezért az `eval` és a `loadtest` a gépen futtatható (`uv run agentic-rag eval`), vagy egy `./data/eval:/app/data/eval` csatolást kell hozzáadni.
+Az `eval` és a `loadtest` a gépen futtatandó (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); ez az ajánlott út. A stack csak a `data/raw` mappát csatolja, ezért a konténerben futtatásukhoz egy további `./data/eval:/app/data/eval` bind mount kell, és a riportok csak akkor íródnak ki, ha a konténer felhasználója írhatja a `data/eval/results` mappát.
+
+**Linuxos gépek és a 10001-es UID.** Az `app` konténer 10001-es UID-dal és GID-dal fut. A bind mount megtartja a gépen lévő könyvtár tulajdonosát, ezért Linuxos Docker Engine-en az alkalmazás csak akkor írhat egy bind mountba, ha a könyvtár a 10001-es UID számára írható; a Windowsos és macOS-es Docker Desktop ezt elfedi, mert a bind mountokat mindenki számára írhatónak mutatja. Vagy írhatóvá kell tenni a könyvtárat a 10001-es UID számára, vagy a saját azonosítóinkkal kell felépíteni a képfájlt az `APP_UID` és `APP_GID` build argumentumokkal:
+
+```bash
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
+```
+
+A nevesített volume-ok (`chroma-data`, `hf-cache`) csak addig veszik át a tulajdonosukat a képfájlból, amíg üresek. Az azonosítók módosítása után ezért vagy helyben kell átállítani a tulajdonosukat (a parancs a [`compose.yaml`](compose.yaml) `app` szolgáltatásánál, a megjegyzésben található), vagy újra kell létrehozni őket a `docker compose down -v` paranccsal, amely az indexet és a letöltött modelleket is törli.
 
 **A képfájl önmagában** (a kötelező `Dockerfile`, Compose nélkül):
 
 ```bash
 docker build -t agentic-rag-chatbot:dev .
-docker run --rm -p 127.0.0.1:8501:8501 -v ./data/raw:/app/data/raw:ro -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
+docker run --rm -p 127.0.0.1:8501:8501 --mount type=bind,source=./data/raw,target=/app/data/raw,readonly -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
 ```
+
+A `--mount` alak változatlanul jut el a Dockerhez Git Bashből, PowerShellből és POSIX shellekből is; a Git Bash a rövid `-v ./data/raw:/app/data/raw:ro` alakot Windows-útvonallá írná át, és a korpusz rossz helyre, írhatóan kerülne. Sima `docker build` esetén más azonosítókhoz a `--build-arg APP_UID=... --build-arg APP_GID=...` kapcsolók adhatók meg.
+
+**A képfájl rétegei.** A `Dockerfile` két lépcsős. A `deps` lépcső csak az `uv.lock`-ban rögzített függőségeket telepíti (`uv sync --locked --no-dev --no-install-project`); a `--locked` leállítja a buildet, ha az `uv.lock` nem egyezik a `pyproject.toml`-lal. A futtató lépcső két, a kódtól független rétegben átmásolja ezt a virtuális környezetet (1,71 GB), és lefordítja a bytecode-ját (415 MB), majd hozzáadja az `src/` mappát (348 kB) és a projekt kis, szerkeszthető (editable) telepítését (115 kB). Az `src/` módosítása ezért csak a két kis réteget építi újra: mérve 7 s, szemben a szétválasztás előtti kb. 53 s-mal és egy új, 2,11 GB-os réteggel. A képfájl 2,88 GB (`python:3.12.14-slim-trixie`, csak CPU-s torch); nincs benne uv, buildfájl és fejlesztői függőség, a kód és a függőségek pedig root tulajdonúak, az alkalmazás felhasználója számára csak olvashatók.
 
 **Leállítás és takarítás:**
 
@@ -287,7 +303,7 @@ docker compose down -v   # a volume-okat is törli
 
 További lehetőségek, például az Ollama API publikálása a gépre egy helyi `compose.override.yaml` fájllal, a [`compose.yaml`](compose.yaml) fejlécében olvashatók.
 
-> Eddig ellenőrizve: a képfájl buildje, mindkét Compose konfiguráció és az `app` szolgáltatás fake módban (healthy állapot, a UI a 8501-es porton). Még nem futott: a teljes stack az Ollama szolgáltatásokkal (modell-letöltés, GPU-átadás).
+> Eddig ellenőrizve: a képfájl buildje (beállított `APP_UID`/`APP_GID` értékkel is, valamint a `--locked` hibája elavult lock fájl esetén), a rétegek újrahasznosítása az `src/` módosítása után, mindkét Compose konfiguráció, az `app` szolgáltatás fake módban (healthy állapot, a UI a 8501-es porton), a `docker run --mount` parancs Git Bashből, valamint egy 1000-es UID tulajdonában lévő, szimulált linuxos bind mount. Még nem futott: a teljes stack az Ollama szolgáltatásokkal (modell-letöltés, GPU-átadás), natív Linux gép és macOS.
 
 ### Konfiguráció
 
@@ -297,19 +313,21 @@ Minden beállítás környezeti változó, amelyet az `agentic_rag.config.Settin
 cp .env.example .env    # PowerShell: Copy-Item .env.example .env
 ```
 
-A valódi környezeti változók elsőbbséget élveznek a `.env`-del szemben, az üres érték (`KEY=`) pedig az alapértéket jelenti. Az `uv run agentic-rag config` kiírja az érvényes értékeket; érvénytelen érték esetén a parancssori felület 2-es kilépési kóddal leáll, és megnevezi a változót.
+A valódi környezeti változók elsőbbséget élveznek a `.env`-del szemben, az üres érték (`KEY=`) pedig az alapértéket jelenti. A `.env` legyen UTF-8 kódolású: a Windows PowerShell 5.1 a `>` operátorral és az `Out-File` paranccsal UTF-16-ot ír, ezért a fájlt a fenti `Copy-Item` paranccsal érdemes lemásolni. Az `uv run agentic-rag config` kiírja az érvényes értékeket; érvénytelen érték, illetve olvashatatlan vagy nem UTF-8 kódolású `.env` esetén a parancssori felület 2-es kilépési kóddal leáll, és megnevezi a problémát, a UI pedig a chat helyén mutatja.
 
 | Változó | Alapértelmezés | Cél |
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama`, vagy `fake` a szkriptelt offline modellhez |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Az Ollama szerver címe |
 | `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Az Ollama chatmodell tagje (ideiglenes) |
+| `OLLAMA_NUM_CTX` | `8192` | A kontextusablak tokenben, 512–131072, az Ollama `num_ctx` paramétereként elküldve; a prompt és a válasz osztozik rajta, a hosszabb promptot az Ollama szó nélkül levágja |
+| `OLLAMA_TIMEOUT_S` | `120.0` | Az egyes Ollama-kérések HTTP-időkorlátja másodpercben, 0-nál nagyobb |
 | `LLM_TEMPERATURE` | `0.0` | Mintavételi hőmérséklet, 0,0–2,0 |
 | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface`, vagy `fake` az offline, hash-alapú embeddinghez |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` | Hugging Face embedding modell (ideiglenes) |
 | `DATA_DIR` | `data/raw` | A korpusz könyvtára |
 | `CHROMA_DIR` | `data/chroma_db` | A vektorindex könyvtára |
-| `CHROMA_COLLECTION` | `documents` | A Chroma kollekció neve |
+| `CHROMA_COLLECTION` | `documents` | A Chroma kollekció neve: 3–63 karakter (szándékos projektszintű korlát), nem lehet IPv4-cím |
 | `TOP_K` | `4` | Lekérdezésenként visszakeresett chunkok száma |
 | `MAX_RETRIES` | `2` | Az ellenőrzés → újratervezés ciklus korlátja |
 | `INGEST_ON_START` | `true` | Induláskor felépíti az indexet, ha hiányzik (a 6. fázisig nincs hatása) |
@@ -329,7 +347,14 @@ A Compose stackben a `compose.yaml` az `app` szolgáltatásnak az `OLLAMA_BASE_U
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH]` | Funkcionális értékelés | 7. fázis |
 | `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Terheléses teszt a lefordított gráfon | 8. fázis |
 
-Kilépési kódok: 0 siker esetén; 1, ha a parancs hibára futott, vagy egy későbbi fázisra van tervezve; 2 érvénytelen kapcsolók vagy beállítások esetén; 130 megszakításkor.
+Kilépési kódok:
+
+- 0 siker esetén;
+- 1, ha a parancs hibára futott: egy későbbi fázisra tervezett funkció (`PlannedFeatureError`) csak az üzenetét írja ki, minden más hiba a traceback-jét;
+- 2 használati és konfigurációs hibák esetén: érvénytelen kapcsolók (ide tartozik az `InvalidArgumentError` is, például egy `NODE_TARGETS`-en kívüli `eval --node`), érvénytelen beállítások, vagy `ConfigurationError` (olvashatatlan vagy nem UTF-8 kódolású `.env`);
+- 130 megszakításkor.
+
+A részletek a [docs/architecture.md](docs/architecture.md#errors-and-exit-codes) fájlban találhatók (angolul).
 
 > 🚧 *Kitöltendő:* az adatbetöltés (2. fázis), valamint az értékelés és a terheléses teszt futtatása (7–8. fázis).
 
@@ -345,7 +370,7 @@ agentic-rag-chatbot-poc/
 │       ├── README.md               # az értékelő készlet sémája és a riportok formátuma
 │       └── results/                # commitolt értékelési és terheléses riportok; a 7. fázisig csak .gitkeep
 ├── docs/
-│   ├── architecture.md             # célgráfok, állapotsémák, node- és eszköztáblázatok, konfigurációs referencia (angol)
+│   ├── architecture.md             # célgráfok, állapot- és átívelő szerződések, konfigurációs referencia (angol)
 │   ├── project-structure-plan.md   # a repository terve és felépítési sorrendje (angol)
 │   └── project-structure-plan.hu.md  # ugyanez magyarul
 ├── src/
@@ -354,10 +379,13 @@ agentic-rag-chatbot-poc/
 │       ├── __main__.py             # `python -m agentic_rag`
 │       ├── cli.py                  # parancsok: ingest · eval · loadtest · export-graph · config
 │       ├── config.py               # Settings környezeti változókból és .env-ből; a naplózás beállítása
+│       ├── errors.py               # PlannedFeatureError, ConfigurationError, InvalidArgumentError, planned()
 │       ├── llm.py                  # chatmodell factory: Ollama vagy a szkriptelt fake
 │       ├── embeddings.py           # embedding factory: sentence-transformers vagy offline, hash-alapú fake
 │       ├── tracing.py              # TraceEvent és a @traced node-dekorátor
+│       ├── reports.py              # RESULTS_DIR; RunReport, az EvalReport és a LoadTestReport alapja
 │       ├── agent/                  # fő agentic workflow (a 4. fázisig váz)
+│       │   ├── types.py            # Intent, Verdict, SubtaskKind, LangGraph nélkül
 │       │   ├── state.py            # AgentState, Subtask, SubtaskResult (kész sémák)
 │       │   ├── nodes.py            # a hét node függvénye
 │       │   ├── routing.py          # feltételes élek és a Send szétosztás
@@ -374,7 +402,7 @@ agentic-rag-chatbot-poc/
 │       ├── evaluation/
 │       │   ├── dataset.py          # EvalItem és a questions.jsonl betöltője
 │       │   ├── metrics.py          # hit@k és routing-pontosság; LLM-mel pontozott metrikák a 7. fázisban
-│       │   └── runner.py           # riportmodellek; run_evaluation() a 7. fázisban
+│       │   └── runner.py           # riportmodellek és NODE_TARGETS; run_evaluation() a 7. fázisban
 │       ├── loadtest/
 │       │   └── runner.py           # válaszidő-statisztikák és riportmodell; run_load_test() a 8. fázisban
 │       └── ui/
@@ -387,7 +415,7 @@ agentic-rag-chatbot-poc/
 │   ├── test_config.py              # alapértékek, környezeti változók és .env, ellenőrzés, naplózás
 │   ├── test_embeddings.py          # offline fake és Hugging Face ág, letöltés nélkül
 │   ├── test_evaluation.py          # kérdésbetöltő, metrikák és riportmodellek
-│   ├── test_llm.py                 # provider-választás, szkriptelt fake; élő Ollama-ellenőrzés (`ollama` marker)
+│   ├── test_llm.py                 # provider-választás, szkriptelt fake; élő Ollama-ellenőrzés (`ollama` marker, alapból kihagyva)
 │   ├── test_loadtest.py            # percentilisek, válaszidő-összesítések és a riportmodell
 │   ├── test_skeletons_agent.py     # a fő workflow váza: node-ok, routing, eszközök, gráf
 │   ├── test_skeletons_rag.py       # az adatbetöltés és a RAG algráf váza
@@ -396,11 +424,12 @@ agentic-rag-chatbot-poc/
 │   └── test_ui.py                  # a Streamlit UI AppTest-tel
 ├── .dockerignore                   # a build context engedélylistája (allowlist)
 ├── .env.example                    # minden beállítás az alapértékével
+├── .gitattributes                  # LF sorvégek minden checkoutban, Windowson is
 ├── .gitignore
 ├── .python-version                 # 3.12
 ├── compose.gpu.yaml                # opcionális NVIDIA GPU override az ollama szolgáltatáshoz
 ├── compose.yaml                    # app + ollama + egyszeri modell-letöltés
-├── Dockerfile                      # többlépcsős uv build, nem root futtatás, healthcheck
+├── Dockerfile                      # deps és futtató lépcső, uv sync --locked, nem root futtatás, healthcheck
 ├── LICENSE
 ├── pyproject.toml                  # függőségek, konzolos belépési pont, ruff és pytest beállítások
 ├── README.md                       # dokumentáció (angol)

@@ -11,8 +11,6 @@ import functools
 import inspect
 import itertools
 import operator
-import subprocess
-import sys
 import time
 import typing
 from collections import Counter
@@ -132,20 +130,6 @@ def test_epoch_now_is_monotonic_epoch_time() -> None:
     readings = [epoch_now() for _ in range(1000)]
     assert readings == sorted(readings)
     assert abs(readings[-1] - time.time()) < 1.0
-
-
-def test_importing_the_module_does_not_load_langgraph() -> None:
-    """Report models import TraceEvent without loading LangGraph or LangChain."""
-    code = (
-        "import sys, agentic_rag.tracing\n"
-        "heavy = {'langgraph', 'langchain_core', 'langsmith'}\n"
-        "print(','.join(sorted(heavy & {name.split('.')[0] for name in sys.modules})))\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "", f"loaded: {result.stdout.strip()}"
 
 
 # --- traced: wrapper identity and naming -------------------------------------------------

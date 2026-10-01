@@ -9,7 +9,7 @@ import logging
 import subprocess
 import sys
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -21,14 +21,6 @@ from agentic_rag.config import Settings
 from agentic_rag.errors import ConfigurationError, InvalidArgumentError, planned
 
 COMMANDS = ("ingest", "eval", "loadtest", "export-graph", "config")
-HEAVY_MODULES = (
-    "torch",
-    "sentence_transformers",
-    "chromadb",
-    "streamlit",
-    "langchain_huggingface",
-    "langchain_chroma",
-)
 
 
 def install_module(
@@ -57,19 +49,6 @@ def tiny_graph(node_name: str) -> Any:
     builder.add_edge(START, node_name)
     builder.add_edge(node_name, END)
     return builder.compile()
-
-
-@pytest.fixture(autouse=True)
-def _restore_logging() -> Iterator[None]:
-    """``main()`` configures logging; put the root and HTTP library levels back afterwards."""
-    root = logging.getLogger()
-    saved_level, saved_handlers = root.level, list(root.handlers)
-    library_levels = {name: logging.getLogger(name).level for name in ("httpx", "httpcore")}
-    yield
-    root.setLevel(saved_level)
-    root.handlers[:] = saved_handlers
-    for name, level in library_levels.items():
-        logging.getLogger(name).setLevel(level)
 
 
 # --- help, version and usage errors -------------------------------------------------------
@@ -476,7 +455,8 @@ def test_export_graph_raw_mermaid_needs_a_single_graph(
     assert "choose --graph agent or --graph rag" in capsys.readouterr().err
 
 
-# --- start-up cost ------------------------------------------------------------------------
+# --- python -m agentic_rag in a fresh interpreter -----------------------------------------
+# What --help and config import is checked in test_imports.py.
 
 
 def run_python(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -513,18 +493,43 @@ def test_python_m_agentic_rag_reports_a_dotenv_that_is_not_utf8(tmp_path: Path) 
     assert result.stdout == ""
 
 
-def test_help_and_config_do_not_import_heavy_libraries(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("raise_statement", "last_line", "traceback"),
+    [
+        pytest.param(
+            "raise planned('agentic_rag.evaluation.runner.run_evaluation', 7)",
+            str(planned("agentic_rag.evaluation.runner.run_evaluation", 7)),
+            False,
+            id="planned-feature",
+        ),
+        pytest.param(
+            "raise NotImplementedError('StructuredTool does not support sync invocation.')",
+            "NotImplementedError: StructuredTool does not support sync invocation.",
+            True,
+            id="library-not-implemented",
+        ),
+    ],
+)
+def test_python_m_agentic_rag_exits_with_1_when_a_command_fails(
+    raise_statement: str, last_line: str, traceback: bool, tmp_path: Path
+) -> None:
+    # The real entry point (agentic_rag.__main__) around a stand-in runner that raises: only
+    # a planned feature is reported without its traceback.
     script = (
-        "import contextlib, io, json, sys\n"
-        "from agentic_rag.cli import main\n"
-        "with contextlib.redirect_stdout(io.StringIO()):\n"
-        "    codes = [main(['--help']), main(['export-graph', '--help']), main(['config'])]\n"
-        f"heavy = sorted(name for name in {HEAVY_MODULES!r} if name in sys.modules)\n"
-        "print(json.dumps({'codes': codes, 'heavy': heavy}))\n"
+        "import runpy, sys, types\n"
+        "from agentic_rag.errors import planned\n"
+        "def run_evaluation(settings, **kwargs):\n"
+        f"    {raise_statement}\n"
+        "runner = types.ModuleType('agentic_rag.evaluation.runner')\n"
+        "runner.run_evaluation = run_evaluation\n"
+        "sys.modules[runner.__name__] = runner\n"
+        "sys.argv = ['agentic-rag', 'eval']\n"
+        "runpy.run_module('agentic_rag', run_name='__main__')\n"
     )
 
     result = run_python(["-c", script], cwd=tmp_path)
 
-    assert result.returncode == 0, result.stderr
-    report = json.loads(result.stdout.strip().splitlines()[-1])
-    assert report == {"codes": [0, 0, 0], "heavy": []}
+    assert result.returncode == 1
+    assert result.stderr.rstrip().splitlines()[-1] == last_line
+    assert ("Traceback (most recent call last)" in result.stderr) is traceback
+    assert result.stdout == ""

@@ -35,14 +35,6 @@ from agentic_rag.embeddings import (
 )
 
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"
-HEAVY_MODULES = (
-    "torch",
-    "transformers",
-    "sentence_transformers",
-    "langchain_huggingface",
-    "chromadb",
-    "langchain_chroma",
-)
 SAMPLE_TEXTS = (
     "How do I renew my passport?",
     "Árvíztűrő tükörfúrógép",
@@ -55,16 +47,15 @@ SAMPLE_TEXTS = (
 E5_PROMPTS = EmbeddingPrompts(query=E5_QUERY_PROMPT, document=E5_PASSAGE_PROMPT)
 NO_PROMPTS = EmbeddingPrompts()
 
-# Runs in a fresh interpreter: embeds argv[1] (a JSON list of texts) with the fake provider
-# and reports which of the modules in argv[2] got imported.
+# Runs in a fresh interpreter: embeds argv[1] (a JSON list of texts) with the fake provider.
+# That this loads no model library is checked in test_imports.py.
 _FAKE_PROVIDER_PROBE = """
 import json, sys
 from agentic_rag.config import Settings
 from agentic_rag.embeddings import get_embeddings
 embeddings = get_embeddings(Settings(_env_file=None, embedding_provider="fake"))
 vectors = embeddings.embed_documents(json.loads(sys.argv[1]))
-heavy = sorted(name for name in json.loads(sys.argv[2]) if name in sys.modules)
-print(json.dumps({"vectors": vectors, "heavy": heavy}))
+print(json.dumps(vectors))
 """
 
 
@@ -136,15 +127,14 @@ def sentence_transformer_instances(monkeypatch: pytest.MonkeyPatch) -> list[Any]
 
 
 @pytest.fixture(scope="module")
-def fake_provider_probe(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+def fake_provider_vectors(tmp_path_factory: pytest.TempPathFactory) -> list[list[float]]:
     """Embed ``SAMPLE_TEXTS`` with the fake provider in a fresh interpreter.
 
     The child process gets its own hash seed and none of the settings variables of this
     process.
 
     Returns:
-        ``{"vectors": [...], "heavy": [...]}``: the vectors, and the heavy modules the child
-        process imported.
+        The vectors of ``SAMPLE_TEXTS``, computed by the child process.
     """
     field_names = set(Settings.model_fields)
     env = {name: value for name, value in os.environ.items() if name.lower() not in field_names}
@@ -155,7 +145,6 @@ def fake_provider_probe(tmp_path_factory: pytest.TempPathFactory) -> dict[str, A
             "-c",
             _FAKE_PROVIDER_PROBE,
             json.dumps(SAMPLE_TEXTS),
-            json.dumps(HEAVY_MODULES),
         ],
         capture_output=True,
         text=True,
@@ -234,14 +223,10 @@ def test_same_text_gives_the_same_vector() -> None:
     assert first.embed_query("solar panel") == second.embed_query("solar panel")
 
 
-def test_vectors_do_not_depend_on_the_process(fake_provider_probe: dict[str, Any]) -> None:
+def test_vectors_do_not_depend_on_the_process(fake_provider_vectors: list[list[float]]) -> None:
     expected = HashingEmbeddings().embed_documents(list(SAMPLE_TEXTS))
 
-    assert fake_provider_probe["vectors"] == expected
-
-
-def test_fake_provider_imports_no_model_library(fake_provider_probe: dict[str, Any]) -> None:
-    assert fake_provider_probe["heavy"] == []
+    assert fake_provider_vectors == expected
 
 
 @pytest.mark.parametrize("text", SAMPLE_TEXTS)

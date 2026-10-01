@@ -13,7 +13,10 @@ update:
 
 The contract assumes the node convention of both graphs: a node returns a ``dict`` partial
 update or ``None``. :func:`traced` raises ``TypeError`` for any other return value,
-``Command`` included; ``Command`` support arrives in the phase that first returns one.
+``Command`` included; ``Command`` support arrives in the phase that first returns one. That
+phase also needs a rule for ``Command(graph=Command.PARENT)`` from a subgraph node: its update
+reaches the stream only under the parent node's key, where ``skip_forwarded`` drops it, and
+the subgraph's earlier events never reach the final state.
 
 Subgraph events: a node that invokes a subgraph (``run_rag_subtask`` invoking the RAG
 subgraph) forwards the subgraph's ``trace`` in its own update, so ``invoke`` results include

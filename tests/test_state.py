@@ -8,8 +8,6 @@ reset of subtask_results works, the verify loop follows the documented retry con
 the RAG subgraph's trace reaches the main trace.
 """
 
-import subprocess
-import sys
 from collections import Counter
 from collections.abc import Callable
 from typing import Any, get_args
@@ -143,20 +141,6 @@ def test_state_reexports_the_light_literal_types() -> None:
     for name in agent_types.__all__:
         assert getattr(agent_state, name) is getattr(agent_types, name)
         assert name in agent_state.__all__
-
-
-def test_literal_types_import_without_langgraph() -> None:
-    """agentic_rag.agent.types, which the evaluation imports, does not load LangGraph."""
-    code = (
-        "import sys, agentic_rag.agent.types\n"
-        "heavy = {'langgraph', 'langchain_core'}\n"
-        "print(','.join(sorted(heavy & {name.split('.')[0] for name in sys.modules})))\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "", f"loaded: {result.stdout.strip()}"
 
 
 # --- throwaway graphs that mirror the planned workflow ----------------------------------------

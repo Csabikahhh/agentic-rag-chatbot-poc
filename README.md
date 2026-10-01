@@ -101,7 +101,7 @@ flowchart LR
 | Local LLM | Open-source model served locally, no paid APIs |
 | Document index | Chunked and embedded documents from the chosen text data source |
 
-The detailed target design (the seven main nodes and their routing, the four steps of the RAG subgraph, the tools), the state contracts as they exist in the code and the configuration reference are in [docs/architecture.md](docs/architecture.md).
+The detailed target design (the seven main nodes and their routing, the four steps of the RAG subgraph, the tools), the state contracts as they exist in the code, the cross-cutting contracts (dependency injection, the execution model, trace events, the re-plan loop, citation numbering, errors and exit codes) and the configuration reference are in [docs/architecture.md](docs/architecture.md).
 
 > 🚧 *To be completed:* the main workflow's nodes and routing logic, the RAG subgraph's steps, the tools, the state schema and the ingestion pipeline.
 >
@@ -137,7 +137,7 @@ Notes on the provisional defaults:
 
 **Candidate metrics:** answer correctness against the reference, faithfulness to the retrieved context, retrieval hit rate@k, and routing / tool-selection accuracy.
 
-**In place:** the question-set format (`data/eval/questions.jsonl`, one JSON object per question, validated by `agentic_rag.evaluation.dataset`) is described in [data/eval/README.md](data/eval/README.md). Retrieval hit@k and routing accuracy are implemented; the LLM-judged correctness and faithfulness, the runner and the questions themselves follow in Phase 7. The reports will be written as JSON to `data/eval/results/`.
+**In place:** the question-set format (`data/eval/questions.jsonl`, one JSON object per question, validated by `agentic_rag.evaluation.dataset`) is described in [data/eval/README.md](data/eval/README.md). Each question lists its `expected_documents`: paths relative to `DATA_DIR` with forward slashes, as ingestion identifies the documents. Retrieval hit@k is computed per retrieve sub-task from the ranked documents of its chunks (`retrieved_documents` in the report, one list per sub-task), never from the answer's de-duplicated citations. `eval --target node` evaluates one of the nodes an item can drive on its own (`NODE_TARGETS`: `analyze_request` for routing, `run_rag_subtask` for retrieval); any other node is rejected with exit code 2. Retrieval hit@k and routing accuracy are implemented; the LLM-judged correctness and faithfulness, the runner and the questions themselves follow in Phase 7. The reports will be written as JSON to `data/eval/results/`.
 
 > 🚧 *To be completed:* location of the evaluation set, scoring method, results, conclusions and the command to reproduce them.
 
@@ -147,7 +147,7 @@ Notes on the provisional defaults:
 
 **Reported metrics:** latency (mean, p50, p95, p99, max), throughput and error rate, plus a per-node latency breakdown to pinpoint the main bottleneck — followed by 1–2 concrete optimization proposals.
 
-**In place:** the latency statistics and the report format (`agentic_rag.loadtest.runner`). Percentiles use linear interpolation between the closest ranks (the default of `numpy.percentile`), warm-up requests are reported separately, and per-node shares must not add `run_rag_subtask` to the RAG subgraph nodes it ran, because its time includes theirs. The runner follows in Phase 8.
+**In place:** the latency statistics and the report format (`agentic_rag.loadtest.runner`). Percentiles use linear interpolation between the closest ranks (the default of `numpy.percentile`), warm-up requests are reported separately, and per-node shares must not add `run_rag_subtask` to the RAG subgraph nodes it ran, because its time includes theirs. The runner follows in Phase 8: it builds the graph once and calls `graph.invoke` from a `ThreadPoolExecutor(max_workers=concurrency)`, the same synchronous path the UI and the evaluation use.
 
 > 🚧 *To be completed:* results, bottleneck analysis, optimization proposals and the command to reproduce them.
 
@@ -159,7 +159,7 @@ Notes on the provisional defaults:
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for local development; it also installs Python 3.12 when it is missing.
 - Docker with Docker Compose 2.24 or newer for the containers (`compose.yaml` uses the optional `env_file` syntax).
 - For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The provisional default model, `qwen2.5:7b-instruct` (4-bit, about 4.7 GB), fits in an 8 GB GPU and also runs on the CPU, more slowly (*exact RAM/VRAM requirements TBD*). Fake mode needs neither a model nor a GPU.
-- Disk space for the full stack: the application image (about 2.9 GB), the Ollama image and the chat model.
+- Disk space for the full stack: the application image (about 2.9 GB; 2.88 GB measured), the Ollama image and the chat model.
 
 ### What works today
 
@@ -167,7 +167,7 @@ The foundation runs end to end, but it does not answer questions yet:
 
 - the tests pass offline, with the fake LLM and the fake embeddings;
 - the CLI lists its commands and `config` prints the effective settings; `ingest`, `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
-- the Streamlit UI starts, shows the configuration and answers every question with a notice that the agent is planned for Phase 4;
+- the Streamlit UI starts, shows the configuration and answers every question with a notice that the agent is planned for Phase 4. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - the image builds, and the `app` service starts healthy in fake mode.
 
 ### Local development with uv
@@ -187,8 +187,8 @@ Clone the repository and set it up:
 ```bash
 git clone https://github.com/Csabikahhh/agentic-rag-chatbot-poc.git
 cd agentic-rag-chatbot-poc
-uv sync                                          # .venv with Python 3.12, the locked dependencies and the dev tools
-uv run pytest                                    # offline test suite
+uv sync --locked                                 # .venv with Python 3.12, the locked dependencies and the dev tools
+uv run pytest                                    # offline test suite; ends with "... passed, 1 deselected"
 uv run ruff check .                              # lint
 uv run ruff format --check .                     # formatting
 uv run python -m agentic_rag --help              # the commands (or: uv run agentic-rag --help)
@@ -206,7 +206,9 @@ LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake uv run streamlit run src/agentic_rag/u
 $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run src/agentic_rag/ui/app.py
 ```
 
-The tests always run in fake mode; they ignore the shell's settings and `.env`.
+`uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
+
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `552 passed, 1 deselected` (measured on 2026-10-01; the number of passed tests grows with the phases). `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -214,6 +216,8 @@ The tests always run in fake mode; they ignore the shell's settings and `.env`.
 ollama pull qwen2.5:7b-instruct
 uv run pytest -m ollama       # live check against the local server; skipped when it is not reachable
 ```
+
+The live test follows `OLLAMA_BASE_URL` and `OLLAMA_MODEL` from the shell, so it can also check another server or model.
 
 ### Run with Docker Compose
 
@@ -267,14 +271,26 @@ docker compose run --rm --no-deps --service-ports -e OLLAMA_BASE_URL=http://host
 docker compose run --rm --no-deps app agentic-rag config
 ```
 
-The stack mounts only `data/raw`, so run `eval` and `loadtest` on the host (`uv run agentic-rag eval`), or add a `./data/eval:/app/data/eval` mount.
+Run `eval` and `loadtest` on the host (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); this is the recommended way. The stack mounts only `data/raw`, so running them in the container needs an extra `./data/eval:/app/data/eval` bind mount, and the reports can then only be written if `data/eval/results` is writable by the container's user.
+
+**Linux hosts and UID 10001.** The `app` container runs as UID and GID 10001. A bind mount keeps the owner of the host directory, so on a Linux engine the app can write to a bind mount only if that directory is writable for UID 10001; Docker Desktop on Windows and macOS hides this, because it presents bind mounts as writable for everyone. Either make the directory writable for UID 10001, or build the image with your own IDs through the `APP_UID` and `APP_GID` build arguments:
+
+```bash
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
+```
+
+Named volumes (`chroma-data`, `hf-cache`) take their owner from the image only while they are empty, so after changing the IDs, change their owner in place (the command is in the comment on the `app` service in [`compose.yaml`](compose.yaml)) or recreate them with `docker compose down -v`, which also deletes the index and the downloaded models.
 
 **The image on its own** (the required `Dockerfile`, without Compose):
 
 ```bash
 docker build -t agentic-rag-chatbot:dev .
-docker run --rm -p 127.0.0.1:8501:8501 -v ./data/raw:/app/data/raw:ro -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
+docker run --rm -p 127.0.0.1:8501:8501 --mount type=bind,source=./data/raw,target=/app/data/raw,readonly -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
 ```
+
+The `--mount` form reaches Docker unchanged from Git Bash, PowerShell and POSIX shells; Git Bash would rewrite the short form `-v ./data/raw:/app/data/raw:ro` into a Windows path and mount the corpus at the wrong place, read-write. With plain `docker build`, pass `--build-arg APP_UID=... --build-arg APP_GID=...` for other IDs.
+
+**Image layers.** The `Dockerfile` has two stages. The `deps` stage installs only the dependencies pinned in `uv.lock` (`uv sync --locked --no-dev --no-install-project`); `--locked` stops the build when `uv.lock` is out of date with `pyproject.toml`. The runtime stage copies that virtual environment (1.71 GB) and compiles its bytecode (415 MB) in two layers that do not depend on the code, then adds `src/` (348 kB) and a small editable install of the project (115 kB). A change to `src/` therefore rebuilds only the two small layers: measured at 7 s, against about 53 s and a new 2.11 GB layer before the split. The image is 2.88 GB (`python:3.12.14-slim-trixie`, CPU-only torch); it contains no uv, no build files and no dev dependencies, and code and dependencies are root-owned and read-only for the app user.
 
 **Stop and clean up:**
 
@@ -287,7 +303,7 @@ docker compose down -v   # also delete the volumes
 
 More options, such as publishing the Ollama API on the host through a local `compose.override.yaml`, are described in the header of [`compose.yaml`](compose.yaml).
 
-> Verified so far: the image build, both Compose configurations, and the `app` service in fake mode (healthy, the UI served on port 8501). Not run yet: the full stack with the Ollama services (model pull, GPU passthrough).
+> Verified so far: the image build (also with `APP_UID`/`APP_GID` set, and the `--locked` failure on a stale lock file), the layer reuse after a change to `src/`, both Compose configurations, the `app` service in fake mode (healthy, the UI served on port 8501), the `docker run --mount` command from Git Bash, and a simulated Linux bind mount owned by UID 1000. Not run yet: the full stack with the Ollama services (model pull, GPU passthrough), a native Linux host and macOS.
 
 ### Configuration
 
@@ -297,19 +313,21 @@ All settings are environment variables, read by `agentic_rag.config.Settings`. [
 cp .env.example .env    # PowerShell: Copy-Item .env.example .env
 ```
 
-Real environment variables take precedence over `.env`, and an empty value (`KEY=`) means the default. `uv run agentic-rag config` prints the effective values; an invalid value stops the CLI with exit code 2 and names the variable.
+Real environment variables take precedence over `.env`, and an empty value (`KEY=`) means the default. Keep `.env` in UTF-8: Windows PowerShell 5.1 writes UTF-16 with `>` and `Out-File`, so copy the file with `Copy-Item` as above. `uv run agentic-rag config` prints the effective values; an invalid value, or a `.env` that cannot be read or is not UTF-8, stops the CLI with exit code 2 and names the problem, and the UI shows it instead of the chat.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama`, or `fake` for the scripted offline model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL of the Ollama server |
 | `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Ollama chat model tag (provisional) |
+| `OLLAMA_NUM_CTX` | `8192` | Context window in tokens, 512–131072, sent as Ollama's `num_ctx`; the prompt and the answer share it, and Ollama silently truncates a longer prompt |
+| `OLLAMA_TIMEOUT_S` | `120.0` | HTTP timeout in seconds of each Ollama request, greater than 0 |
 | `LLM_TEMPERATURE` | `0.0` | Sampling temperature, 0.0–2.0 |
 | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface`, or `fake` for the offline hashing embeddings |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` | Hugging Face embedding model (provisional) |
 | `DATA_DIR` | `data/raw` | Corpus directory |
 | `CHROMA_DIR` | `data/chroma_db` | Vector index directory |
-| `CHROMA_COLLECTION` | `documents` | Chroma collection name |
+| `CHROMA_COLLECTION` | `documents` | Chroma collection name: 3–63 characters (a deliberate project limit), not an IPv4 address |
 | `TOP_K` | `4` | Chunks retrieved per query |
 | `MAX_RETRIES` | `2` | Bound on the verify → re-plan loop |
 | `INGEST_ON_START` | `true` | Build the index at start-up when it is missing (no effect until Phase 6) |
@@ -329,7 +347,14 @@ In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` 
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH]` | Functional evaluation | Phase 7 |
 | `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Load test against the compiled graph | Phase 8 |
 
-Exit codes: 0 on success, 1 when the command failed or is planned for a later phase, 2 for invalid arguments or settings, 130 when interrupted.
+Exit codes:
+
+- 0 on success;
+- 1 when the command failed: a feature planned for a later phase (`PlannedFeatureError`) prints only its message, any other error its traceback;
+- 2 for usage and configuration errors: invalid arguments (including an `InvalidArgumentError`, such as `eval --node` outside `NODE_TARGETS`), invalid settings, or a `ConfigurationError` (a `.env` that cannot be read or is not UTF-8);
+- 130 when interrupted.
+
+The details are in [docs/architecture.md](docs/architecture.md#errors-and-exit-codes).
 
 > 🚧 *To be completed:* data ingestion (Phase 2) and the evaluation and load-test runs (Phases 7–8).
 
@@ -345,7 +370,7 @@ agentic-rag-chatbot-poc/
 │       ├── README.md               # evaluation question-set schema and report formats
 │       └── results/                # committed evaluation and load-test reports; only .gitkeep until Phase 7
 ├── docs/
-│   ├── architecture.md             # target graphs, state contracts, node and tool tables, configuration reference
+│   ├── architecture.md             # target graphs, state and cross-cutting contracts, configuration reference
 │   ├── project-structure-plan.md   # repository plan and build order
 │   └── project-structure-plan.hu.md  # the plan in Hungarian
 ├── src/
@@ -354,10 +379,13 @@ agentic-rag-chatbot-poc/
 │       ├── __main__.py             # `python -m agentic_rag`
 │       ├── cli.py                  # commands: ingest · eval · loadtest · export-graph · config
 │       ├── config.py               # Settings from environment variables and .env; logging set-up
+│       ├── errors.py               # PlannedFeatureError, ConfigurationError, InvalidArgumentError, planned()
 │       ├── llm.py                  # chat model factory: Ollama, or the scripted fake
 │       ├── embeddings.py           # embedding factory: sentence-transformers, or offline hashing
 │       ├── tracing.py              # TraceEvent and the @traced node decorator
+│       ├── reports.py              # RESULTS_DIR; RunReport, the base of EvalReport and LoadTestReport
 │       ├── agent/                  # main agentic workflow (skeleton until Phase 4)
+│       │   ├── types.py            # Intent, Verdict, SubtaskKind, without LangGraph
 │       │   ├── state.py            # AgentState, Subtask, SubtaskResult (implemented contracts)
 │       │   ├── nodes.py            # the seven node functions
 │       │   ├── routing.py          # conditional edges and the Send fan-out
@@ -374,7 +402,7 @@ agentic-rag-chatbot-poc/
 │       ├── evaluation/
 │       │   ├── dataset.py          # EvalItem and the questions.jsonl loader
 │       │   ├── metrics.py          # hit@k and routing accuracy; LLM-judged metrics in Phase 7
-│       │   └── runner.py           # report models; run_evaluation() in Phase 7
+│       │   └── runner.py           # report models and NODE_TARGETS; run_evaluation() in Phase 7
 │       ├── loadtest/
 │       │   └── runner.py           # latency statistics and report model; run_load_test() in Phase 8
 │       └── ui/
@@ -387,7 +415,7 @@ agentic-rag-chatbot-poc/
 │   ├── test_config.py              # defaults, environment and .env handling, validation, logging
 │   ├── test_embeddings.py          # offline fake and Hugging Face branch, without downloads
 │   ├── test_evaluation.py          # dataset loader, metrics and report models
-│   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`)
+│   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`, deselected by default)
 │   ├── test_loadtest.py            # percentiles, latency summaries and the report model
 │   ├── test_skeletons_agent.py     # main workflow skeleton: nodes, routing, tools, graph
 │   ├── test_skeletons_rag.py       # ingestion and RAG subgraph skeletons
@@ -396,11 +424,12 @@ agentic-rag-chatbot-poc/
 │   └── test_ui.py                  # Streamlit UI under AppTest
 ├── .dockerignore                   # build-context allowlist
 ├── .env.example                    # every setting with its default
+├── .gitattributes                  # LF line endings in every checkout, Windows included
 ├── .gitignore
 ├── .python-version                 # 3.12
 ├── compose.gpu.yaml                # optional NVIDIA GPU override for the ollama service
 ├── compose.yaml                    # app + ollama + one-shot model pull
-├── Dockerfile                      # multi-stage uv build, non-root runtime, health check
+├── Dockerfile                      # deps and runtime stages, uv sync --locked, non-root runtime, health check
 ├── LICENSE
 ├── pyproject.toml                  # dependencies, console script, ruff and pytest settings
 ├── README.md                       # documentation (English)

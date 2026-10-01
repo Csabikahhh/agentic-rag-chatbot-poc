@@ -1,0 +1,40 @@
+# Line endings: LF in the repository and in every checkout, including Windows
+# clones with core.autocrlf=true, so that shell scripts and other files copied
+# into the Linux image keep working. Git detects binary files by their content;
+# the entries below also mark the common binary types explicitly (no line-ending
+# conversion, no text diff or merge).
+* text=auto eol=lf
+
+# Windows batch files need CRLF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+
+# Documents and archives
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.tar binary
+*.whl binary
+
+# Model weights, indexes and serialized data
+*.gguf binary
+*.bin binary
+*.safetensors binary
+*.onnx binary
+*.pt binary
+*.pkl binary
+*.npy binary
+*.parquet binary
+*.sqlite3 binary

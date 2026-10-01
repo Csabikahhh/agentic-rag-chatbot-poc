@@ -1,7 +1,6 @@
 """Tests for agentic_rag.config: defaults, environment and .env handling, validation, logging."""
 
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -60,7 +59,7 @@ def read_dotenv_from(directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(Settings.model_config, "env_file", CONFIGURED_ENV_FILE)
 
 
-def test_fields_and_defaults_match_the_specification() -> None:
+def test_fields_and_defaults_are_the_expected_ones() -> None:
     assert list(Settings.model_fields) == list(EXPECTED_DEFAULTS)
     assert Settings(_env_file=None).model_dump() == EXPECTED_DEFAULTS
 
@@ -141,6 +140,21 @@ def test_keyword_arguments_override_the_environment(monkeypatch: pytest.MonkeyPa
 
 # --- validation ---------------------------------------------------------------------------
 
+# Boundary cases that the CHROMA_COLLECTION rule accepts.
+VALID_COLLECTION_NAMES = [
+    "abc",
+    "x" * 63,
+    "docs_v1.0-test",
+    # Not IPv4 addresses, so chromadb accepts them as names; a dotted-quad pattern would not.
+    "999.999.999.999",
+    "256.1.1.1",
+    "01.2.3.4",
+    "1.2.3",
+    "1.2.3.4.5",
+]
+# Names that parse as IPv4 addresses: chromadb rejects them, so the rule rejects them too.
+IPV4_COLLECTION_NAMES = ["10.0.0.1", "255.255.255.255"]
+
 
 @pytest.mark.parametrize(
     ("name", "value"),
@@ -167,8 +181,7 @@ def test_keyword_arguments_override_the_environment(monkeypatch: pytest.MonkeyPa
         ("CHROMA_COLLECTION", "my documents"),
         ("CHROMA_COLLECTION", "docs..v1"),
         ("CHROMA_COLLECTION", "x" * 64),
-        ("CHROMA_COLLECTION", "10.0.0.1"),
-        ("CHROMA_COLLECTION", "255.255.255.255"),
+        *(("CHROMA_COLLECTION", name) for name in IPV4_COLLECTION_NAMES),
     ],
 )
 def test_invalid_values_are_rejected(
@@ -199,24 +212,30 @@ def test_ollama_limits_accept_their_bounds(
     assert getattr(Settings(_env_file=None), name.lower()) == expected
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "abc",
-        "x" * 63,
-        "docs_v1.0-test",
-        # Not IPv4 addresses, so chromadb accepts them as names; a dotted-quad pattern would not.
-        "999.999.999.999",
-        "256.1.1.1",
-        "01.2.3.4",
-        "1.2.3",
-        "1.2.3.4.5",
-    ],
-)
+@pytest.mark.parametrize("name", VALID_COLLECTION_NAMES)
 def test_valid_collection_names_are_accepted(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv("CHROMA_COLLECTION", name)
 
     assert Settings(_env_file=None).chroma_collection == name
+
+
+def test_the_collection_rule_agrees_with_the_installed_chromadb(tmp_path: Path) -> None:
+    # The rule promises that chromadb accepts every name it accepts, and it copies chromadb's
+    # IPv4 rule. Checking the boundary cases against the installed client turns "re-check
+    # after upgrading chromadb" into a failing test instead of a late ingestion error.
+    chromadb = pytest.importorskip("chromadb")
+    from chromadb.config import Settings as ChromaSettings
+    from chromadb.errors import InvalidArgumentError as ChromaInvalidArgumentError
+
+    client = chromadb.PersistentClient(
+        path=str(tmp_path / "chroma"), settings=ChromaSettings(anonymized_telemetry=False)
+    )
+
+    for name in VALID_COLLECTION_NAMES:
+        assert client.create_collection(name, embedding_function=None).name == name
+    for name in IPV4_COLLECTION_NAMES:
+        with pytest.raises(ChromaInvalidArgumentError):
+            client.create_collection(name, embedding_function=None)
 
 
 def test_collection_name_error_states_the_project_rule(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,19 +467,7 @@ def test_env_example_comments_every_variable_and_shows_the_run_modes() -> None:
 
 
 # --- logging ------------------------------------------------------------------------------
-
-
-@pytest.fixture
-def root_logger() -> Iterator[logging.Logger]:
-    """The root logger, with its level, handlers and the HTTP library levels restored after."""
-    root = logging.getLogger()
-    saved_level, saved_handlers = root.level, list(root.handlers)
-    library_levels = {name: logging.getLogger(name).level for name in ("httpx", "httpcore")}
-    yield root
-    root.setLevel(saved_level)
-    root.handlers[:] = saved_handlers
-    for name, level in library_levels.items():
-        logging.getLogger(name).setLevel(level)
+# root_logger comes from conftest.py, whose autouse fixture restores the logging setup.
 
 
 def test_configure_logging_adds_one_handler_and_sets_levels(root_logger: logging.Logger) -> None:

@@ -2,15 +2,12 @@
 
 Until Phases 2 and 3 these modules are typed skeletons. The tests pin what the later phases
 build on: the node names and their order, the node signatures with their explicit
-dependencies, the builder's signature, the data models, the metadata keys, the planned stubs,
-and that importing the modules stays light.
+dependencies, the builder's signature, the data models, the metadata keys and the planned
+stubs. That importing the modules stays light is checked in test_imports.py.
 """
 
 import inspect
 import json
-import os
-import subprocess
-import sys
 import typing
 from collections.abc import Callable
 from pathlib import Path
@@ -61,27 +58,6 @@ RAG_DEPENDENCY_TYPES: dict[str, Any] = {
 }
 
 SKELETON_MODULES = (loaders, chunking, index, nodes, graph)
-LIGHT_MODULES = (
-    "agentic_rag.embeddings",
-    "agentic_rag.ingestion",
-    "agentic_rag.ingestion.loaders",
-    "agentic_rag.ingestion.chunking",
-    "agentic_rag.ingestion.index",
-    "agentic_rag.rag",
-    "agentic_rag.rag.state",
-    "agentic_rag.rag.nodes",
-    "agentic_rag.rag.graph",
-)
-HEAVY_MODULES = (
-    "torch",
-    "transformers",
-    "sentence_transformers",
-    "langchain_huggingface",
-    "langchain_text_splitters",
-    "chromadb",
-    "langchain_chroma",
-    "streamlit",
-)
 DOCUMENT = Document(page_content="Some text.", metadata={"source": "guide.md"})
 
 
@@ -136,15 +112,6 @@ STUB_CALLS: dict[str, tuple[int, Callable[[Settings], object]]] = {
     ),
     "agentic_rag.rag.graph.build_rag_graph": (3, graph.build_rag_graph),
 }
-
-# Runs in a fresh interpreter: imports the modules in argv[1] and prints which of the modules
-# in argv[2] got imported along the way.
-_IMPORT_PROBE = """
-import importlib, json, sys
-for name in json.loads(sys.argv[1]):
-    importlib.import_module(name)
-print(json.dumps(sorted(name for name in json.loads(sys.argv[2]) if name in sys.modules)))
-"""
 
 
 def valid_index_stats(**changes: Any) -> dict[str, Any]:
@@ -338,25 +305,3 @@ def test_chunk_metadata_fills_every_source_field_except_content_and_score() -> N
 
     assert ChunkMetadata.__required_keys__ == {"source", "chunk_id"}
     assert keys - {"start_index"} == set(Source.model_fields) - {"content", "score"}
-
-
-# --- import cost ----------------------------------------------------------------------------
-
-
-def test_importing_the_rag_and_ingestion_modules_loads_no_heavy_library(tmp_path: Path) -> None:
-    field_names = set(Settings.model_fields)
-    env = {name: value for name, value in os.environ.items() if name.lower() not in field_names}
-
-    completed = subprocess.run(
-        [sys.executable, "-c", _IMPORT_PROBE, json.dumps(LIGHT_MODULES), json.dumps(HEAVY_MODULES)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-        cwd=tmp_path,
-        timeout=120,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == []

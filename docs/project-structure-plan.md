@@ -4,7 +4,7 @@
 
 > **Status:** proposal, written 2026-10-01. This document plans the *skeleton* of the repository and the order in which to build it. Detailed design (exact prompts, metrics, chunk sizes) is decided while building and recorded in the [README](../README.md) and the other documents in `docs/`.
 >
-> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. Next: decisions 8–9, then Phase 2. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
+> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. The foundation was then reviewed and revised on the same day; those changes are part of section 12 as well. Next: decisions 8–9, then Phase 2. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
 
 ## Contents
 
@@ -248,7 +248,7 @@ One Streamlit entrypoint. Chat with `st.chat_message` / `st.chat_input`; a live 
 
 ### 5.6 Evaluation and load test (`evaluation/`, `loadtest/`)
 
-- `evaluation/`: reads `data/eval/questions.jsonl` (`question`, `reference_answer`, `expected_sources`, `expected_intent`), runs either a single node or the full graph, and scores correctness (local LLM-as-judge or semantic similarity), faithfulness, retrieval hit@k and routing accuracy. Writes JSON to `data/eval/results/` and a summary to `docs/evaluation.md`.
+- `evaluation/`: reads `data/eval/questions.jsonl` (`question`, `reference_answer`, `expected_documents`, `expected_intent`), runs either a single node or the full graph, and scores correctness (local LLM-as-judge or semantic similarity), faithfulness, retrieval hit@k and routing accuracy. Writes JSON to `data/eval/results/` and a summary to `docs/evaluation.md`.
 - `loadtest/`: async harness that sends N queries (50–200) at a given concurrency against the compiled graph, records per-request latency and per-node latency from the trace, and reports mean / p50 / p95 / p99 / max, throughput and error rate. Running it in both `fake` and `ollama` modes isolates the LLM's share of the latency, which is the core of the bottleneck analysis.
 
 ### 5.7 Shared modules (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`)
@@ -267,6 +267,8 @@ One Streamlit entrypoint. Chat with `st.chat_message` / `st.chat_input`; a live 
 | `LLM_PROVIDER` | `ollama` | `ollama` or `fake` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | `http://ollama:11434` inside Compose, `http://host.docker.internal:11434` for a host Ollama |
 | `OLLAMA_MODEL` | `qwen2.5:7b-instruct` *(decision 4, provisional)* | chat model tag |
+| `OLLAMA_NUM_CTX` | `8192` | context window in tokens, 512–131072, sent as Ollama's `num_ctx` *(added)* |
+| `OLLAMA_TIMEOUT_S` | `120.0` | HTTP timeout in seconds of each Ollama request, > 0 *(added)* |
 | `LLM_TEMPERATURE` | `0.0` | sampling temperature, 0.0–2.0 *(added)* |
 | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` or `fake` (offline hashing embeddings, no model download) *(added)* |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` *(decision 5, provisional)* | Hugging Face model id |
@@ -278,7 +280,7 @@ One Streamlit entrypoint. Chat with `st.chat_message` / `st.chat_input`; a live 
 | `INGEST_ON_START` | `true` | build the index if it is missing when the container starts (no effect until the Phase 6 entrypoint exists) |
 | `LOG_LEVEL` | `INFO` | |
 
-*(added)*: introduced while building the foundation. Every value is validated at start-up (for example `TOP_K` ≥ 1, `MAX_RETRIES` ≥ 0, `LLM_TEMPERATURE` between 0.0 and 2.0, and Chroma's rules for collection names); an empty value means the default, and `agentic-rag config` prints the effective values. The full reference is in [architecture.md](architecture.md#configuration-reference).
+*(added)*: introduced while building the foundation or after its review. Every value is validated at start-up (for example `TOP_K` ≥ 1, `MAX_RETRIES` ≥ 0, `LLM_TEMPERATURE` between 0.0 and 2.0, and the project's rule for collection names: 3–63 characters, a deliberate limit stricter than chromadb's 512, and no IPv4 addresses); an empty value means the default, `.env` must be UTF-8, and `agentic-rag config` prints the effective values. The full reference is in [architecture.md](architecture.md#configuration-reference).
 
 Run modes:
 
@@ -292,7 +294,12 @@ Fully offline fake mode also sets `EMBEDDING_PROVIDER=fake`; with the default `h
 
 ## 7. Containerization plan
 
-- **`Dockerfile`** (required): multi-stage. The builder stage copies `uv` from `ghcr.io/astral-sh/uv` and runs `uv sync --frozen --no-dev` into `/app/.venv`; the runtime stage is `python:3.12-slim`, non-root user, copies the venv and `src/`, sets `HF_HOME` to a volume-backed path, `EXPOSE 8501`, healthcheck on `/_stcore/health`, `CMD streamlit run src/agentic_rag/ui/app.py --server.address=0.0.0.0`. Optionally pre-download the embedding model at build time for fully offline starts.
+The `Dockerfile` bullet describes the image as built; the other deviations from this section are listed in [section 12.4](#124-containers-section-7).
+
+- **`Dockerfile`** (required): two stages on `python:3.12.14-slim-trixie`, with `uv` mounted from `ghcr.io/astral-sh/uv:0.12.6` into the `RUN` steps only.
+  - The `deps` stage runs `uv sync --locked --no-dev --no-install-project` into `/app/.venv`: only the dependencies pinned in `uv.lock`, and `--locked` stops the build when `uv.lock` is out of date with `pyproject.toml`.
+  - The runtime stage copies the venv (`COPY --link`, 1.71 GB) and compiles its bytecode with `compileall` (415 MB) in two layers that do not depend on the code, creates the non-root user (`APP_UID`/`APP_GID` build arguments, default 10001), then adds `src/` and a small editable project layer with `uv sync --locked --no-dev --refresh-package agentic-rag-chatbot-poc`. A change to `src/` rebuilds only the last two layers (measured: 7 s; the image is 2.88 GB).
+  - It sets `HF_HOME` to a volume-backed path, `EXPOSE 8501`, a healthcheck on `/_stcore/health`, and `CMD streamlit run src/agentic_rag/ui/app.py --server.address=0.0.0.0 --server.port=8501`. Pre-downloading the embedding model at build time for fully offline starts stays optional.
 - **`.dockerignore`**: `.git`, `.venv`, `data/chroma_db`, `tests`, `docs`, `task`, `.claude`, caches, `.env`.
 - **`compose.yaml`**:
   - `ollama`: `ollama/ollama`, named volume `ollama-data`, port `11434`, healthcheck via `ollama list`, GPU reservation under an optional `gpu` profile (Docker Desktop needs the WSL2 backend for NVIDIA pass-through; without it inference falls back to CPU).
@@ -311,7 +318,7 @@ Each phase ends in a committed state that passes its "done when" check. Phases 6
 | **1. Scaffold** (this plan's core) | `pyproject.toml`, `.python-version`, `uv.lock`, `src/agentic_rag/` with docstring-only modules, `config.py`, `cli.py` with stub commands, `.env.example`, `tests/conftest.py` + one smoke test, ruff config, `.dockerignore`, README *Repository structure* updated | `uv sync` succeeds; `uv run pytest` is green; `uv run python -m agentic_rag --help` lists the commands; `uv run ruff check .` is clean |
 | **2. Ingestion and index** | corpus in `data/raw/` (or a download command), loaders, chunking, `index.py`, `ingest` command, fixture-corpus test | `python -m agentic_rag ingest` builds the index; a sample query returns the expected chunk with metadata |
 | **3. RAG subgraph** | `rag/state.py`, `nodes.py`, `graph.py`, tests, Mermaid export | `rag_graph.invoke({"query": ...})` returns context and sources; tests pass in fake mode |
-| **4. Main workflow and tools** | `agent/*`, fake LLM scripting, `export-graph` command writing `docs/architecture.md` | ≥ 5 nodes, routing tests cover all four intents, decomposition runs via `Send`, the retry loop is bounded, an end-to-end answer works with Ollama |
+| **4. Main workflow and tools** | `agent/*`, fake LLM scripting, `export-graph` output replacing the hand-drawn diagrams in `docs/architecture.md` | ≥ 5 nodes, routing tests cover all four intents, decomposition runs via `Send`, the retry loop is bounded, an end-to-end answer works with Ollama |
 | **5. Streamlit UI** | `ui/app.py`, `components.py`, `AppTest` smoke test | Chat answers, steps appear live, sources are shown, runs with `LLM_PROVIDER=fake` |
 | **6. Containerization** | `Dockerfile`, `compose.yaml`, entrypoint with optional ingest, README run guide | From a fresh clone `docker compose up --build` serves the UI on 8501 with the model pulled and the index built; `docker build .` alone succeeds |
 | **7. Functional evaluation** | `data/eval/questions.jsonl` (10–20), `evaluation/*`, `eval` command, `docs/evaluation.md`, README section | `python -m agentic_rag eval` writes the results and the summary; conclusions are in the README |
@@ -328,7 +335,9 @@ Progress on 2026-10-01:
   - from Phases 3–4: the state contracts (`rag/state.py`, `agent/state.py`) and the interface of the `search_knowledge_base` tool;
   - from Phase 5: the Streamlit shell (`ui/app.py`, `ui/components.py`) with its `AppTest` tests in `tests/test_ui.py`; still in Phase 5: the check against the real graph;
   - from Phases 2, 7 and 8: the data contracts and pure helpers they build on: the document and chunk metadata, the chunking defaults and `IndexStats`; the question-set loader, hit@k, routing accuracy and the report models; the latency statistics.
-- **Skeletons:** every other public function of Phases 2–8 exists with its final signature and raises `NotImplementedError` with the message `<qualified name> is planned for Phase <N> (see docs/project-structure-plan.md, section 8)`. These messages and the tests cite this section, so keep its number and the phase numbers stable.
+- **Skeletons:** every other public function of Phases 2–8 exists as a typed stub and raises `agentic_rag.errors.PlannedFeatureError` (a `NotImplementedError` subclass) through `planned(...)`, with the message `<qualified name> is planned for Phase <N> (see docs/project-structure-plan.md, section 8)`. These messages and the tests cite this section, so keep its number and the phase numbers stable.
+  - **Fixed now:** the names (modules, public functions and classes, `NODE_NAMES`, `RAG_NODE_NAMES`, `NODE_TARGETS`); the dependency convention (the state is a node's only positional parameter, its dependencies are keyword-only and bound by the graph builder, and every library factory takes `settings` as a required argument; see [dependency injection and cheap builds](architecture.md#dependency-injection-and-cheap-builds)); and the data contracts (the state schemas and records, the report models, the question-set format).
+  - **May still be extended:** a later phase may add keyword-only parameters, for example a node dependency found while writing its prompt, or narrow a return type, as long as existing callers and the tests of these contracts keep working. Such changes are recorded in section 12.
 - **Phase 4 note:** the `export-graph` command already exists (`--graph`, `--format`, `--output`) and draws the graphs once they are built. It writes a complete Markdown file, so its output is pasted into `docs/architecture.md`, or written to a file of its own, rather than pointing `--output` at the hand-written document.
 
 ## 9. Requirement traceability
@@ -372,11 +381,13 @@ Progress on 2026-10-01:
 
 ## 12. Deviations from the plan
 
-Recorded while building the foundation (2026-10-01). The sections above keep the original plan; where they differ, the code and this list are current.
+Recorded while building the foundation and after its review (2026-10-01). The sections above keep the original plan, except for the settings table of section 6 and the `Dockerfile` bullet of section 7, which describe the code; where they differ, the code and this list are current. The cross-cutting contracts are described once, in [architecture.md](architecture.md).
 
 ### 12.1 Configuration (section 6)
 
-- Three settings were added: `LLM_TEMPERATURE`, `EMBEDDING_PROVIDER` (`huggingface` or `fake`, so tests and model-free demos need no embedding download) and `CHROMA_COLLECTION` (validated with Chroma's naming rules).
+- Five settings were added: `LLM_TEMPERATURE`, `EMBEDDING_PROVIDER` (`huggingface` or `fake`, so tests and model-free demos need no embedding download), `CHROMA_COLLECTION`, and, after the review, `OLLAMA_NUM_CTX` (default 8192, 512–131072) and `OLLAMA_TIMEOUT_S` (default 120.0, > 0). The last two reach `ChatOllama` as `num_ctx` and as the timeout of its HTTP clients: without `num_ctx` the server's small default context length would silently truncate the prompts, and the HTTP timeout is the only bound on a slow request, because LangGraph cannot time out a sync node.
+- `CHROMA_COLLECTION` follows the project's own rule: 3–63 characters from `[A-Za-z0-9._-]`, a letter or digit at both ends, no `..`, and not an IPv4 address. The 63-character limit is deliberately stricter than chromadb 1.5.9 (3–512), to keep names portable; the IPv4 rule matches chromadb's own check. A test checks the boundary names against the installed chromadb.
+- `get_settings()` raises `agentic_rag.errors.ConfigurationError` for a `.env` that cannot be read or is not UTF-8 (Windows PowerShell 5.1 writes UTF-16 with `>`), and `config.describe_invalid_settings()` names the invalid variables for the CLI and the UI alike.
 - `INGEST_ON_START` exists but has no effect yet: nothing ingests at start-up until the Phase 6 entrypoint, which needs Phase 2's `build_index`. The UI does not ingest, to keep its start-up light.
 - Chunk size and overlap are code constants (`ChunkingConfig`: 900 characters with a 150-character overlap, inside the range of section 5.4), not settings.
 
@@ -389,10 +400,23 @@ Recorded while building the foundation (2026-10-01). The sections above keep the
 - The fake LLM is a rule engine (`ScriptedChatModel`: ordered regular expressions, JSON structured output); its rules for the real prompts come in Phase 4. `EMBEDDING_PROVIDER=fake` adds an offline embedding fake (a hashed bag of words) next to the planned sentence-transformers model.
 - The evaluation item also has `id`, `tags` and `notes`, and unknown keys are rejected. The load-test statistics also report the minimum, and the warm-up requests are summarized separately.
 
+Changed after the review:
+
+- **Trace contract trimmed.** `@traced` accepts a `dict` or `None` result only and raises `TypeError` otherwise, `Command` included; `trace_events_from_chunk` accepts `version="v2"` stream parts, plain `{node: update}` mappings and `(namespace, mapping)` tuples. Traced nodes get no LangGraph `CachePolicy`, because a cache hit would replay the old `TraceEvent`; caching happens inside a node. `tracing.py` imports no LangGraph.
+- **Node convention for both graphs.** The RAG nodes now take keyword-only dependencies like the agent nodes: `rewrite_query(state, *, chat_model)`, `retrieve(state, *, vector_store, top_k)`, `grade_documents(state, *, min_score, chat_model)` and `build_context(state)`; `build_rag_graph(settings)` binds them with `functools.partial`, the vector store through a lock-guarded lazy provider of `load_index(settings)`. Library factories take `settings` as a required argument, without a `get_settings()` fallback.
+- **Execution model.** The nodes are sync. Instead of the async harness of section 5.6, the load test calls `graph.invoke` from a `ThreadPoolExecutor(max_workers=concurrency)`; the async overrides of the fakes and the `_arun` hint of the search tool were removed.
+- **Citations.** `build_context` numbers its markers per RAG run in rank order (`sources[i]` is `[i + 1]`), and `synthesize_answer` assigns one global numbering across the sub-tasks, which `finalize_response` returns as `sources`.
+- **Errors.** `agentic_rag.errors` defines `PlannedFeatureError` (a `NotImplementedError` subclass that every stub raises through `planned()`), `ConfigurationError` and `InvalidArgumentError`. The CLI and the UI treat only `PlannedFeatureError` as a planned gap; the CLI maps `InvalidArgumentError`, `ConfigurationError` and invalid settings to exit code 2.
+- **Shared modules.** `agent/types.py` holds `Intent`, `Verdict` and `SubtaskKind` without LangGraph imports (`agent/state.py` re-exports them), and `reports.py` holds `RESULTS_DIR` and `RunReport`, the base of `EvalReport` and `LoadTestReport`, so loading a report loads no LangGraph. The checkpointer allowlist `STATE_RECORD_TYPES` was removed; the no-checkpointer note in `agent/state.py` says what a checkpointer would need.
+- **Evaluation.** `expected_sources` became `expected_documents` (paths relative to `DATA_DIR` with forward slashes, or URLs) and `retrieved_sources` became `retrieved_documents`, one ranked list per retrieve sub-task; hit@k is computed per retrieve sub-task from `SubtaskResult.sources`, never from `AgentOutput.sources`. `eval --target node` accepts only `NODE_TARGETS` (`analyze_request`, `run_rag_subtask`); `run_evaluation` raises `InvalidArgumentError` for any other node. `EvalItemResult` rejects verdicts that contradict its own item.
+- **Ingestion.** `build_index` reconciles the collection with the corpus by set difference: it upserts every produced chunk, then deletes every stored id the run did not produce, so a plain `ingest` handles edited files too and `--rebuild` is needed only after changing the embeddings. Support for the instruct prefixes of E5 models was dropped; the `query:` / `passage:` prefixes stay.
+
 ### 12.3 UI (section 5.5)
 
 - The UI streams with `stream_mode=["updates", "values"]` (`version="v2"`) instead of `"updates"` alone: the updates feed the step panel, and the last root values give the answer and the sources. The step panel lists the main graph's own steps; the RAG subgraph's inner steps are not listed, and its result appears in the retrieved-context panel.
 - The sidebar shows the provider, the models and top-k read-only. They are changed through environment variables or `.env` and a restart, not through widgets.
+- Added after the review: a run the user stops gets the turn *Stopped before an answer was produced.*, so the history never keeps an unanswered question; the agent receives the new question with only the earlier questions that were answered and their answers; `$` signs outside code are escaped when an answer is rendered, so amounts do not turn into LaTeX; only `PlannedFeatureError` is shown as a notice, every other exception is logged and shown with `st.exception`; invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error.
+- The step panel groups parallel steps by overlapping time windows, so `Send` workers that do not overlap in time show as sequential steps; grouping by LangGraph step is left to Phase 5.
 
 ### 12.4 Containers (section 7)
 
@@ -400,7 +424,9 @@ Recorded while building the foundation (2026-10-01). The sections above keep the
 - The images are pinned to exact tags: `python:3.12.14-slim-trixie`, `ghcr.io/astral-sh/uv:0.12.6` and `ollama/ollama:0.35.0`. There is no entrypoint script yet, only `CMD`.
 - The Ollama port is not published on the host, because the host may already run Ollama on 11434 and the API has no authentication; a local, gitignored `compose.override.yaml` can publish it.
 - GPU support is an override file, `compose.gpu.yaml`, instead of a `gpu` profile: a profile switches whole services, so it would need a second `ollama` service, and `depends_on` cannot point at either of two services.
-- The `app` service mounts `./data/raw` read-only instead of `./data`, and the index lives in the named volume `chroma-data`. `eval` and `loadtest` therefore run on the host, or with an extra `./data/eval` mount.
+- The `app` service mounts `./data/raw` read-only instead of `./data`, and the index lives in the named volume `chroma-data`. `eval` and `loadtest` are therefore recommended on the host. In the container they need an extra `./data/eval` bind mount, which the app user (UID/GID 10001) must be able to write: on a Linux engine a bind mount keeps the host owner, so either make `data/eval/results` writable for UID 10001 or build with `APP_UID=$(id -u) APP_GID=$(id -g) docker compose build app`.
+- After the review: the `Dockerfile` uses `uv sync --locked` instead of `--frozen`, so a stale `uv.lock` stops the build, and is split into a `deps` stage and a runtime with separate venv, bytecode, `src/` and project layers (section 7), so code changes no longer rebuild the 2 GB dependency layer. `compose.yaml` passes `APP_UID` and `APP_GID` (default 10001) as build arguments. The `docker run` example uses `--mount type=bind,source=./data/raw,target=/app/data/raw,readonly`, which Git Bash does not rewrite.
+- `.gitattributes` keeps LF line endings in every checkout (`* text=auto eol=lf`, CRLF only for `*.bat` and `*.cmd`), so Windows clones with `core.autocrlf=true` build the same image and a future shell entrypoint keeps working. `.gitignore` anchors the directory patterns that are also common package names (`/build/`, `/dist/`, `/env/`, `/venv/`, `/models/`, `/task/`) to the repository root.
 - `.env` is optional for Compose (`required: false`). `compose.yaml` passes `LLM_PROVIDER`, `EMBEDDING_PROVIDER` and `OLLAMA_MODEL` from the shell or `.env`, and fixes `OLLAMA_BASE_URL` to the `ollama` service.
 - `ollama-pull` runs `ollama show … || ollama pull …`, so it downloads only a missing model, and `app` also waits for `ollama` to be healthy.
 - The model-free start is `LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps app`: without `--no-deps` Compose would also start the Ollama services, and without `EMBEDDING_PROVIDER=fake` the embedding model would be downloaded.
@@ -411,3 +437,6 @@ Recorded while building the foundation (2026-10-01). The sections above keep the
 - Ruff skips `.claude/` (third-party agent and skill files) and does not format `docs/*.md`, whose code snippets are illustrative.
 - The foundation's tests are named after the modules they cover (`test_config.py` … `test_ui.py`). The test files of section 4 (`test_ingestion.py`, `test_rag_subgraph.py`, `test_agent_graph.py`, `test_tools.py`) come with their phases; the `AppTest` tests of the UI are in `tests/test_ui.py` rather than `test_ui_smoke.py`.
 - Section 10 asks for generated diagrams. Until Phases 3–4 build the graphs, `docs/architecture.md` holds hand-drawn target diagrams, labelled as such.
+- Section 10 says model-dependent checks are skipped when Ollama is unavailable. The live Ollama test is instead deselected by default (`addopts = -m "not ollama"`), so `uv run pytest` reports `1 deselected` and never calls a model; `uv run pytest -m ollama` runs it and skips it when the server is unreachable.
+- Ruff's pydocstyle rules `D1` (google convention) require a docstring on every public module, class and function in `src/`; `tests/` are exempt. Docstrings mark code with double backticks.
+- The cross-cutting contracts now have one canonical description in [architecture.md](architecture.md), while the module docstrings still restate parts of them. Consolidating the docstrings so that each contract is stated once is planned together with Phase 4, when the node bodies replace most of the stub docstrings.

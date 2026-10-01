@@ -46,7 +46,8 @@ Persistence: no checkpointer is used, so every request starts from a fresh state
 conversation arrives in ``messages``. If one is added (for example for multi-turn memory), the
 first node of each turn must reset every key except ``messages``, not only
 ``subtask_results`` and ``trace``; ``traced`` accepts only a list of events under ``trace``
-today, so that reset needs support there first.
+today, so that reset needs support there first. Callers then send only the new message:
+``add_messages`` appends messages that have no id, so a resent history would be stored twice.
 """
 
 import operator

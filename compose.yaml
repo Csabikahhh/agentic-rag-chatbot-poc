@@ -2,7 +2,8 @@
 # local LLM served by Ollama. The UI is published on http://localhost:8501 only.
 #
 # 1) Full stack. The first start pulls the chat model (several GB) into the
-#    ollama-data volume and downloads the embedding model into hf-cache:
+#    ollama-data volume; the embedding model is downloaded into hf-cache on
+#    first use:
 #      docker compose up --build
 #
 # 2) Model-free fake mode: scripted LLM and offline fake embeddings, no Ollama
@@ -71,6 +72,19 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # UID and GID of the app user in the image (default 10001). A bind mount
+      # keeps the owner of the host directory on a Linux engine, so for a
+      # writable bind mount (such as ./data/eval) build with your own IDs:
+      #   APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
+      # Named volumes take their owner from the image only while they are
+      # empty: once chroma-data and hf-cache hold data, they keep the old IDs
+      # after an ID change. docker compose down -v resets them, but also deletes
+      # the index and all downloaded models (ollama-data too). To keep them,
+      # change the owner in place:
+      #   docker compose run --rm --no-deps --user root app chown -R "$(id -u):$(id -g)" /app/data/chroma_db /home/app/.cache/huggingface
+      args:
+        APP_UID: "${APP_UID:-10001}"
+        APP_GID: "${APP_GID:-10001}"
     ports:
       - "127.0.0.1:8501:8501" # Use 0.0.0.0 only when other devices need access
     env_file:

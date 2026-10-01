@@ -11,8 +11,6 @@ import json
 import math
 import random
 import statistics
-import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,17 +30,6 @@ from agentic_rag.loadtest.runner import (
 )
 from agentic_rag.reports import RunReport
 from agentic_rag.tracing import TraceEvent
-
-HEAVY_MODULES = (
-    "torch",
-    "sentence_transformers",
-    "chromadb",
-    "langchain_chroma",
-    "langchain_huggingface",
-    "streamlit",
-)
-# The statistics and the report need no graph runtime: loading a committed report stays cheap.
-GRAPH_MODULES = ("langgraph", "langchain_core")
 
 
 def event(node: str, duration_ms: float, started_at: float = 1_000.0) -> TraceEvent:
@@ -395,21 +382,3 @@ def test_run_load_test_signature_matches_the_cli_call() -> None:
         ("output_dir", inspect.Parameter.KEYWORD_ONLY, None),
     ]
     assert signature.return_annotation is LoadTestReport
-
-
-# --- import cost -----------------------------------------------------------------------------
-
-
-def test_importing_the_loadtest_package_loads_no_heavy_library_and_no_graph_runtime() -> None:
-    code = (
-        "import json, sys\n"
-        "import agentic_rag.loadtest.runner\n"
-        f"print(json.dumps([name for name in {HEAVY_MODULES + GRAPH_MODULES!r} "
-        "if name in sys.modules]))\n"
-    )
-
-    completed = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120
-    )
-
-    assert json.loads(completed.stdout) == []

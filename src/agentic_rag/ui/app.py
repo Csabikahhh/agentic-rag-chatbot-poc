@@ -6,13 +6,18 @@ Run it from the repository root locally, or from ``/app`` in the container::
 
 The page is a chat. The conversation is kept in ``st.session_state`` as a list of ``ChatTurn``
 records and replayed on every rerun. A new question goes to the main agent graph
-(``agentic_rag.agent.graph.build_agent_graph``) together with the conversation so far. The app
-streams the run and shows the main steps live as the nodes finish, then the answer and the
-retrieved context it is grounded in. The sidebar shows the effective configuration, read-only.
+(``agentic_rag.agent.graph.build_agent_graph``) together with the earlier questions that were
+answered and their answers (``agent_messages``). The app streams the run and shows the main
+steps live as the nodes finish, then the answer and the retrieved context it is grounded in.
+The sidebar shows the effective configuration, read-only.
 
 Failures never end the session. A part of the agent that is planned for a later phase raises
-``NotImplementedError``, and the assistant turn shows its message as a notice; any other
-exception is shown with ``st.exception``. Either way the conversation is kept.
+``agentic_rag.errors.PlannedFeatureError``, and the assistant turn shows its message as a
+notice. Any other exception, a plain ``NotImplementedError`` included, is a failure: it is
+logged with its traceback and shown with ``st.exception``. When the user stops a run, the
+question still gets an assistant turn, a short notice, so the history never keeps an
+unanswered question. Either way the conversation is kept. Invalid settings, or a ``.env``
+file that cannot be read, replace the chat with an error that names the problem.
 
 Start-up stays light and offline: this script does not import the agent graph, the LLM client,
 the embedding model or the vector store. The graph is imported and built when the first
@@ -26,11 +31,19 @@ from typing import Any
 import streamlit as st
 from pydantic import ValidationError
 
-from agentic_rag.config import Settings, configure_logging, get_settings
+from agentic_rag.config import (
+    Settings,
+    configure_logging,
+    describe_invalid_settings,
+    get_settings,
+)
+from agentic_rag.errors import ConfigurationError, PlannedFeatureError
 from agentic_rag.rag.state import Source
 from agentic_rag.tracing import TraceEvent, trace_events_from_chunk
 from agentic_rag.ui.components import (
     ChatTurn,
+    add_reply,
+    agent_messages,
     escape_markdown,
     render_assistant_turn,
     render_settings,
@@ -58,7 +71,7 @@ def _load_agent_graph(settings_json: str, _settings: Settings) -> Any:
         The compiled main graph.
 
     Raises:
-        NotImplementedError: While the main workflow is planned for a later phase. A failed
+        PlannedFeatureError: While the main workflow is planned for a later phase. A failed
             build is not cached, so the next question tries again.
     """
     # Imported here and not at the top: importing and building the graph can load the LLM
@@ -71,20 +84,30 @@ def _load_agent_graph(settings_json: str, _settings: Settings) -> Any:
 def _run_agent(
     settings: Settings,
     history: Sequence[ChatTurn],
+    steps: list[TraceEvent],
     on_step: Callable[[Sequence[TraceEvent]], None],
 ) -> ChatTurn:
     """Answer the last question of the conversation with the main agent graph.
 
-    The run is streamed with ``stream_mode=["updates", "values"]`` as ``version="v2"`` parts.
-    Every ``updates`` part carries the trace events of the node that has just finished, and
-    the last ``values`` part of the root graph is the final output (``AgentOutput``). The
-    step panel keeps the events the main-graph nodes recorded themselves
-    (``skip_forwarded=True``): the RAG subgraph events that ``run_rag_subtask`` forwards are
-    sub-steps of that worker, not main steps.
+    The graph receives the conversation as ``agent_messages(history)`` builds it. The run is
+    streamed with ``stream_mode=["updates", "values"]`` as ``version="v2"`` parts. Every
+    ``updates`` part carries the trace events of the node that has just finished, and the
+    last ``values`` part of the root graph is the final output (``AgentOutput``). The step
+    panel keeps the events the main-graph nodes recorded themselves (``skip_forwarded=True``):
+    the RAG subgraph events that ``run_rag_subtask`` forwards are sub-steps of that worker,
+    not main steps.
+
+    Only a ``PlannedFeatureError`` means that the run reached a part of the agent that is not
+    built yet. Every other exception, a ``NotImplementedError`` from a library included, is a
+    failure: it is logged with its traceback and kept in the returned turn. When the user
+    stops the run, Streamlit raises its ``StopException`` (a ``BaseException``) from
+    ``on_step``; it passes through, and this function does not return.
 
     Args:
         settings: The effective settings.
         history: The conversation, ending with the new question.
+        steps: Receives the main steps as the nodes finish. The caller owns the list, so the
+            steps that finished before a stop are still at hand.
         on_step: Called with all steps so far whenever new steps arrive.
 
     Returns:
@@ -92,13 +115,13 @@ def _run_agent(
         reached a part of the agent that is planned for a later phase, or the exception of a
         failed run.
     """
-    steps: list[TraceEvent] = []
     try:
         graph = _load_agent_graph(settings.model_dump_json(), settings)
-        messages = [message for turn in history if (message := turn.as_message()) is not None]
         output: Mapping[str, Any] = {}
         for part in graph.stream(
-            {"messages": messages}, stream_mode=["updates", "values"], version="v2"
+            {"messages": agent_messages(history)},
+            stream_mode=["updates", "values"],
+            version="v2",
         ):
             if part["type"] == "updates":
                 new_steps = trace_events_from_chunk(part, skip_forwarded=True)
@@ -109,7 +132,7 @@ def _run_agent(
                 output = part["data"]
         answer = str(output.get("answer") or "")
         sources = [Source.model_validate(item) for item in output.get("sources") or ()]
-    except NotImplementedError as exc:
+    except PlannedFeatureError as exc:
         logger.info("The agent cannot answer yet: %s", exc)
         notice = str(exc) or "This part of the agent is not built yet."
         return ChatTurn(role="assistant", notice=notice, trace=steps)
@@ -119,15 +142,29 @@ def _run_agent(
     return ChatTurn(role="assistant", content=answer, sources=sources, trace=steps)
 
 
-def _describe_invalid_settings(error: ValidationError) -> str:
-    """List the invalid settings by environment-variable name, as Markdown."""
-    problems = []
-    for item in error.errors():
-        name = ".".join(str(part) for part in item["loc"]).upper() or "SETTINGS"
-        problems.append(f"- `{name}`: {escape_markdown(item['msg'])}")
+def _describe_settings_error(error: ValidationError | ConfigurationError) -> str:
+    """Explain, as Markdown, why the settings could not be loaded.
+
+    Args:
+        error: What ``get_settings()`` raised: a ``ValidationError`` for invalid values, a
+            ``ConfigurationError`` when they could not be read at all (an unreadable or
+            non-UTF-8 ``.env`` file).
+
+    Returns:
+        The body of the error message that replaces the chat.
+    """
+    if isinstance(error, ValidationError):
+        problems = [
+            f"- `{name}`: {escape_markdown(problem)}"
+            for name, problem in describe_invalid_settings(error)
+        ]
+        return (
+            "The chat cannot start because some settings are invalid. Fix these environment "
+            "variables or the .env file, then restart the app.\n\n" + "\n".join(problems)
+        )
     return (
-        "The chat cannot start because some settings are invalid. Fix these environment "
-        "variables or the .env file, then restart the app.\n\n" + "\n".join(problems)
+        "The chat cannot start because the settings could not be loaded. "
+        f"{escape_markdown(str(error))}\n\nFix the problem, then restart the app."
     )
 
 
@@ -145,10 +182,8 @@ st.caption(
 
 try:
     settings = get_settings()
-except ValidationError as exc:
-    st.error(
-        _describe_invalid_settings(exc), title="Invalid configuration", icon=":material/error:"
-    )
+except (ValidationError, ConfigurationError) as exc:
+    st.error(_describe_settings_error(exc), title="Invalid configuration", icon=":material/error:")
     st.stop()
 
 configure_logging(settings.log_level)
@@ -169,19 +204,35 @@ for turn in history:
 if question:
     user_turn = ChatTurn(role="user", content=question)
     history.append(user_turn)
-    render_turn(user_turn)
-    with st.chat_message("assistant"):
-        # One slot for the whole turn: the live step panel while the agent runs, then the
-        # finished turn, with the same layout as the turns replayed from the history.
-        turn_slot = st.empty()
+    steps: list[TraceEvent] = []
+    reply: ChatTurn | None = None
+    try:
+        render_turn(user_turn)
+        with st.chat_message("assistant"):
+            # One slot for the whole turn: the live step panel while the agent runs, then the
+            # finished turn, with the same layout as the turns replayed from the history.
+            turn_slot = st.empty()
 
-        def _show_steps(steps: Sequence[TraceEvent]) -> None:
-            """Redraw the live step panel; the progress callback of the run."""
+            def _show_steps(steps_so_far: Sequence[TraceEvent]) -> None:
+                """Redraw the live step panel; the progress callback of the run."""
+                with turn_slot.container():
+                    render_trace(steps_so_far, state="running")
+
+            _show_steps(steps)
+            reply = _run_agent(settings, history, steps, _show_steps)
             with turn_slot.container():
-                render_trace(steps, state="running")
-
-        _show_steps([])
-        answer_turn = _run_agent(settings, history, _show_steps)
-        with turn_slot.container():
-            render_assistant_turn(answer_turn)
-    history.append(answer_turn)
+                render_assistant_turn(reply)
+    except Exception as exc:
+        # _run_agent handles the failures of the run, so this is a failure of the page itself:
+        # close the question with it, and let Streamlit show it.
+        if reply is None:
+            reply = ChatTurn(role="assistant", error=exc, trace=steps)
+        raise
+    finally:
+        # This also runs when the user stops the run. Streamlit then raises StopException (a
+        # BaseException) at the next Streamlit call, and again at every call after it, reads
+        # and writes of st.session_state included. So this block only changes the history list
+        # it already holds, and renders nothing: the next rerun shows the turn.
+        if reply is None:
+            reply = ChatTurn(role="assistant", stopped=True, trace=steps)
+        add_reply(history, user_turn, reply)

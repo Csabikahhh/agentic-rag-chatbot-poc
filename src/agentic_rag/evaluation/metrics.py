@@ -11,9 +11,12 @@ Deterministic metrics, implemented as pure functions:
 
 Where the retrieved documents come from: every retrieve sub-task of a run has a
 ``SubtaskResult`` whose ``sources`` are its chunks in rank order, best first, and
-``[source.source for source in result.sources]`` is its ranked list of documents. Never use
-``AgentOutput.sources`` instead: those are the cited chunks, de-duplicated and merged across
-the sub-tasks in citation order, so their positions are not ranks.
+``[source.source for source in result.sources]`` is its ranked list of documents. These are
+the chunks the RAG subgraph kept after ``grade_documents`` and the de-duplication in
+``build_context``, so hit@k scores retrieval and grading together: a relevant chunk that the
+grading drops counts as a miss. Never use ``AgentOutput.sources`` instead: those are the cited
+chunks, de-duplicated and merged across the sub-tasks in citation order, so their positions
+are not ranks.
 
 Metrics judged by the local LLM (LLM-as-judge), planned for Phase 7:
 

@@ -14,6 +14,7 @@
 # The app runs as UID/GID 10001. On Linux a bind mount keeps the host's owner, so
 # if the app must write to one, build the image with your own IDs:
 #   docker build --build-arg APP_UID="$(id -u)" --build-arg APP_GID="$(id -g)" -t agentic-rag-chatbot:dev .
+# With Compose: APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
 #
 # No API keys or other credentials are baked in: configuration comes from
 # environment variables at run time (see .env.example).
@@ -39,8 +40,9 @@ FROM ${PYTHON_IMAGE} AS deps
 
 # Copy instead of hard-linking from the cache mount, and never download a
 # Python: the venv must use the interpreter of the shared base image. No
-# bytecode here (see the runtime stage), so the venv comes out byte-for-byte
-# the same each time this step runs with the same uv.lock.
+# bytecode here (see the runtime stage): without it, the files of the venv come
+# out the same each time this step runs with the same uv.lock. Only their
+# timestamps differ, and the cache key of the runtime stage's COPY ignores them.
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
@@ -68,10 +70,11 @@ LABEL org.opencontainers.image.title="agentic-rag-chatbot-poc" \
 
 WORKDIR /app
 
-# The big layers come first and depend only on uv.lock and the base image:
-# edits of src/, README.md or LICENSE rebuild only the small layers further
-# down. When the deps stage runs again with the same result (after a
-# pyproject.toml edit that leaves the dependencies alone), BuildKit reuses both.
+# The two big layers (the venv and its bytecode) come first and change only
+# when the deps stage produces a different venv: edits of src/, README.md or
+# LICENSE rebuild only the small layers further down. When the deps stage runs
+# again with the same result (after a pyproject.toml edit that leaves the
+# dependencies alone), BuildKit reuses both layers.
 # Code and dependencies stay root-owned, so the app cannot modify them.
 COPY --link --from=deps /app/.venv /app/.venv
 
@@ -81,8 +84,9 @@ COPY --link --from=deps /app/.venv /app/.venv
 RUN /app/.venv/bin/python -m compileall -q -j 0 /app/.venv/lib
 
 # Numeric IDs, so orchestrators can verify that the user is not root.
-# compose.yaml passes APP_UID and APP_GID (default 10001). --non-unique accepts
-# IDs that the base image already uses, such as GID 20 or 100.
+# compose.yaml passes APP_UID and APP_GID (default 10001). Declared after the
+# big layers, so other IDs rebuild only the small layers below. --non-unique
+# accepts IDs that the base image already uses, such as GID 20 or 100.
 ARG APP_UID=10001
 ARG APP_GID=10001
 RUN groupadd --non-unique --gid "${APP_GID}" app \

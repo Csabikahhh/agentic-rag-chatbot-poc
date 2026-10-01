@@ -4,13 +4,12 @@ The skeleton fixes the node names, the signatures and the documented topology of
 5.1; the behaviour arrives in Phase 4. These tests guard that contract: the names match the
 plan, every node is a traced function with the right state type and explicit dependencies,
 the routing annotations name only known nodes (exactly the destinations of the plan's routing
-rules), the factories require their settings, every stub raises the agreed
-PlannedFeatureError, and importing the package stays free of heavy libraries.
+rules), the factories require their settings, and every stub raises the agreed
+PlannedFeatureError. That importing the package stays free of heavy libraries is checked in
+test_imports.py.
 """
 
 import inspect
-import subprocess
-import sys
 import types
 import typing
 from collections.abc import Callable, Mapping
@@ -76,16 +75,6 @@ SETTINGS_FACTORIES: list[Callable[..., object]] = [
     tools.get_tools,
     tools.get_non_retrieval_tools,
 ]
-
-HEAVY_MODULES = (
-    "chromadb",
-    "langchain_chroma",
-    "langchain_huggingface",
-    "sentence_transformers",
-    "streamlit",
-    "torch",
-    "transformers",
-)
 
 
 def _phase_4(qualified_name: str) -> str:
@@ -323,23 +312,3 @@ def test_cli_export_graph_reports_the_planned_phase(
     """The CLI turns the builder's PlannedFeatureError into its message and exit code 1."""
     assert main(["export-graph", "--graph", "agent"]) == 1
     assert _phase_4("agentic_rag.agent.graph.build_agent_graph") in capsys.readouterr().err
-
-
-# --- module hygiene --------------------------------------------------------------------------
-
-
-def test_importing_the_agent_package_does_not_load_heavy_libraries() -> None:
-    """A fresh interpreter imports every agent module without torch and friends."""
-    code = "\n".join(
-        [
-            "import sys",
-            "import agentic_rag.agent.graph, agentic_rag.agent.nodes",
-            "import agentic_rag.agent.routing, agentic_rag.agent.state, agentic_rag.agent.tools",
-            f"print(','.join(name for name in {HEAVY_MODULES!r} if name in sys.modules))",
-        ]
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "", f"heavy modules imported: {result.stdout.strip()}"

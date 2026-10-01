@@ -161,9 +161,9 @@ def load_dataset(path: Path) -> list[EvalItem]:
 
 
 def _numbered_lines(path: Path) -> Iterator[tuple[int, str]]:
-    """Yield the 1-based number and the decoded text of every line of a UTF-8 file.
+    r"""Yield the 1-based number and the decoded text of every line of a UTF-8 file.
 
-    The bytes are split on ``\\n``, ``\\r\\n`` and ``\\r`` only, before decoding, so
+    The bytes are split on ``\n``, ``\r\n`` and ``\r`` only, before decoding, so
     characters such as U+2028 inside JSON strings do not break a line, and a byte sequence
     that is not UTF-8 is reported with its line number.
     """

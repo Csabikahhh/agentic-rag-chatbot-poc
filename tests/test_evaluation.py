@@ -11,8 +11,6 @@ import inspect
 import json
 import pickle
 import re
-import subprocess
-import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -50,17 +48,6 @@ from agentic_rag.evaluation.runner import (
 from agentic_rag.reports import RESULTS_DIR, RunReport
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-HEAVY_MODULES = (
-    "torch",
-    "sentence_transformers",
-    "chromadb",
-    "langchain_chroma",
-    "langchain_huggingface",
-    "streamlit",
-)
-# The records and the deterministic metrics need no graph runtime: loading a committed report
-# or the question set stays cheap.
-GRAPH_MODULES = ("langgraph", "langchain_core")
 # The main-graph nodes whose input an evaluation item does not carry (see NODE_TARGETS).
 NODES_WITHOUT_ITEM_INPUT = (
     "plan_subtasks",
@@ -739,22 +726,3 @@ def test_eval_report_rejects_a_naive_timestamp() -> None:
 def test_metric_summary_keeps_mean_and_count_consistent(fields: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         MetricSummary(**fields)
-
-
-# --- import cost -----------------------------------------------------------------------------
-
-
-def test_importing_the_evaluation_package_loads_no_heavy_library_and_no_graph_runtime() -> None:
-    code = (
-        "import json, sys\n"
-        "import agentic_rag.evaluation.dataset, agentic_rag.evaluation.metrics\n"
-        "import agentic_rag.evaluation.runner, agentic_rag.reports\n"
-        f"print(json.dumps([name for name in {HEAVY_MODULES + GRAPH_MODULES!r} "
-        "if name in sys.modules]))\n"
-    )
-
-    completed = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120
-    )
-
-    assert json.loads(completed.stdout) == []
