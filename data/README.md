@@ -4,23 +4,24 @@ This directory holds the inputs and outputs of the RAG pipeline. Paths are relat
 
 | Path | Contents | In git | Produced by |
 |---|---|---|---|
-| `raw/` | Source corpus (`DATA_DIR`) | Yes, if the licenses allow it | You, or a download command (Phase 2) |
+| `sources.yaml` | The corpus sources: repository, pinned commit, paths and license of each | Yes | Written by hand (Phase 2) |
+| `raw/` | Source corpus (`DATA_DIR`) | No, it is downloaded | `agentic-rag ingest --download`, from the sources in `sources.yaml` (Phase 2) |
 | `eval/` | Evaluation questions and the committed result files | Yes | Questions written by hand; results from the evaluation and load-test runs (Phases 7–8) |
 | `chroma_db/` | Persistent Chroma vector index (`CHROMA_DIR`) | No (gitignored) | `agentic-rag ingest` |
 
 ## `raw/`: the corpus
 
-These are the documents the chatbot answers from. The domain and the corpus are chosen in Phase 2 (plan decision 8). Until then the directory holds only `.gitkeep`.
+These are the documents the chatbot answers from: the official documentation of MDN Web Docs (a curated subset), React, Vue, Next.js, Nuxt and the TypeScript Handbook (plan decision 8). Phase 2 downloads them; until then the directory holds only `.gitkeep`.
 
-- **Small and well processed.** A few dozen clean documents work better than a large, noisy crawl. Every document should be on topic, have a real text layer (no scanned PDFs without one), and stay stable enough for the reference answers of the evaluation set.
-- **Licensing.** Commit a document only if its license allows redistribution, such as public domain, Creative Commons or your own text. Otherwise commit no copy: provide a download command instead (Phase 2) and record the source URL. In both cases, list every document in `raw/README.md` with its source URL, license and retrieval date.
-- **Formats.** They are decided in Phase 2 together with the corpus. The plan names PDF, Markdown and plain text.
+- **Small and well processed.** A curated subset works better than a complete copy: the current guides and API references of each source, without the legacy and migration sections. Every document should be on topic and, pinned to a commit, stay stable enough for the reference answers of the evaluation set.
+- **Licensing.** Commit a document only if its license allows redistribution, such as public domain, Creative Commons or your own text. Otherwise commit no copy: provide a download command instead and record the source. The chosen documentation is downloaded, not committed, which also keeps the share-alike text of MDN (CC BY-SA 2.5) out of the repository; `sources.yaml` records the repository, the pinned commit, the paths and the license of every source.
+- **Formats.** Markdown and MDX, the source formats of the documentation repositories. The loaders strip the front matter (keeping the title), MDN's `{{macro}}` calls and the MDX components (Phase 2).
 - **What gets indexed.** The loaders read every file under `raw/`, recursively. They skip:
   - dotfiles and files inside dot-directories, such as `.gitkeep`;
   - README files (`README`, `README.md`, `README.hu.md`, in any letter case).
 
-  This is why the source list can live in `raw/README.md`, next to the documents, without being indexed.
-- **Citations.** Each document carries this metadata, which the UI shows and the answers cite. Choose meaningful file and directory names, because they appear in the UI.
+  This is why a README can describe the documents next to them without being indexed, and why the README files of the downloaded repositories are left out.
+- **Citations.** Each document carries this metadata, which the UI shows and the answers cite. Every source is downloaded into a directory of its own (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), so the path shows which documentation a citation comes from.
   - `source`: the path relative to `raw/`;
   - `title`;
   - `page` (1-based), where the format has pages;

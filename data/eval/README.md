@@ -7,7 +7,7 @@ This directory holds the question set of the functional evaluation and the commi
 | `questions.jsonl` | 10–20 evaluation questions with reference answers, expected documents and expected intents | Phase 7 |
 | `results/` | JSON reports of `agentic-rag eval` and `agentic-rag loadtest` | Phases 7 and 8 |
 
-> **Status:** `questions.jsonl` does not exist yet. The 10–20 real questions are written in Phase 7, once the domain and the corpus are chosen (plan decision 8): reference answers and expected documents only make sense for a known corpus. The schema below is already enforced by the loader.
+> **Status:** `questions.jsonl` does not exist yet. The 10–20 real questions are written in Phase 7, over the frontend documentation chosen in plan decision 8 and downloaded in Phase 2: reference answers and expected documents only make sense for a known corpus. They include Hungarian questions, because the corpus is English. The schema below is already enforced by the loader.
 
 ## `questions.jsonl` schema
 

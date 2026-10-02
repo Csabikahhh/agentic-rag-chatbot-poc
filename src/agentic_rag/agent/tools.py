@@ -5,10 +5,10 @@ The agent has two kinds of capability, each exposed as a LangChain tool:
 - ``search_knowledge_base`` (:class:`SearchKnowledgeBaseTool`): the only retrieval tool. It
   runs the RAG subgraph for one query (``RagInput`` in, ``RagOutput`` out), and
   ``run_rag_subtask`` executes it for every ``retrieve`` sub-task.
-- The non-retrieval tool: deterministic and local, chosen together with the domain and the
-  corpus (decisions 8 and 9), which are still open. :func:`get_non_retrieval_tools` is its
-  placeholder. ``call_tool`` executes it for every ``tool`` sub-task, selected by the name the
-  planner put in ``Subtask.tool_name``.
+- The non-retrieval tools: deterministic and local, chosen in decision 9 (browser support,
+  WCAG colour contrast and CSS specificity) and built in Phase 4. :func:`get_non_retrieval_tools`
+  is their placeholder. ``call_tool`` executes one for every ``tool`` sub-task, selected by the
+  name the planner put in ``Subtask.tool_name``.
 
 The model does not call the tools natively: the planner emits typed sub-tasks and explicit
 nodes execute them (decision 7), which is more reliable with small local models. The tools
@@ -113,11 +113,12 @@ class SearchKnowledgeBaseTool(BaseTool):
 
 
 def get_non_retrieval_tools(settings: Settings) -> list[BaseTool]:
-    """Return the agent's non-retrieval tool(s); a placeholder until the domain is chosen.
+    """Return the agent's non-retrieval tools; a placeholder until Phase 4.
 
-    The assignment requires at least one tool that does something other than retrieval. The
-    right tool depends on the domain and the corpus (plan decisions 8 and 9), which are still
-    open, so no tool is implemented or named here yet. The chosen tool must:
+    The assignment requires at least one tool that does something other than retrieval. Plan
+    decision 9 chose three: browser support (a lookup in a pinned release of MDN's
+    ``browser-compat-data``), WCAG colour contrast and CSS specificity. Their names and
+    argument schemas are fixed in Phase 4. Each tool must:
 
     - be deterministic and local: no network access and no model call inside the tool;
     - be a LangChain tool (an ``@tool`` function or a ``BaseTool`` subclass) with a precise
@@ -135,7 +136,7 @@ def get_non_retrieval_tools(settings: Settings) -> list[BaseTool]:
         The non-retrieval tools, with unique names other than ``search_knowledge_base``.
 
     Raises:
-        PlannedFeatureError: Always, until the tool is chosen and built in Phase 4.
+        PlannedFeatureError: Always, until the tools are built in Phase 4.
     """
     raise planned(f"{__name__}.get_non_retrieval_tools", 4)
 

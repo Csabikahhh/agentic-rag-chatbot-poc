@@ -4,7 +4,7 @@
 
 Agentic RAG (Retrieval-Augmented Generation) alapú chatbot prototípus Pythonban – [LangGraph](https://github.com/langchain-ai/langgraph) frameworkkel, helyben futó, nyílt forráskódú LLM-mel és [Streamlit](https://streamlit.io/) felülettel, Dockerrel teljesen konténerizálva.
 
-> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). Az ágens, a RAG algráf, az adatbetöltés, valamint az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: mindegyik jelzi, melyik fázisban készül el. Következik a [projektstruktúra-terv](docs/project-structure-plan.hu.md) két nyitott döntése (8–9.: domain és korpusz, nem visszakeresési eszköz), majd a 2. fázis (adatbetöltés és index). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
+> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). Az ágens, a RAG algráf, az adatbetöltés, valamint az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: mindegyik jelzi, melyik fázisban készül el. A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. Következik a 2. fázis (a korpusz letöltése, adatbetöltés és index). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
 
 ## Tartalom
 
@@ -38,7 +38,7 @@ A feladatkiírás egyes követelményeinek állapota:
 
 **Probléma és adatforrás**
 
-- [ ] Valós probléma (domain / use case) választása, írásos indoklással
+- [x] Valós probléma (domain / use case) választása, írásos indoklással
 - [ ] Szabadon választott szöveges adatforrás – a hangsúly a minőségi feldolgozáson és a skálázható adatintegráción van, nem a mennyiségen
 
 **Agentic architektúra (LangGraph)**
@@ -67,11 +67,14 @@ A feladatkiírás egyes követelményeinek állapota:
 
 ## Problémafelvetés és motiváció
 
-> 🚧 *Kitöltendő* – a választott domain / use case és a chatbot célja, három kérdés mentén:
->
-> - **Miért releváns a probléma?**
-> - **Milyen felhasználói igényt elégít ki?**
-> - **Miért előnyös rá az agentic RAG megközelítés** – egy egyszerű „visszakeresés, majd generálás” lépéssel szemben?
+**Use case: frontend fejlesztői asszisztens.** A chatbot a hivatalos dokumentáció alapján válaszol a webes frontend fejlesztés kérdéseire: HTML, CSS, JavaScript és TypeScript, akadálymentesség, valamint a React, a Vue, a Next.js és a Nuxt keretrendszer. A konkrét tényeket determinisztikus eszközök ellenőrzik: a böngészőtámogatást, a színkontrasztot és a CSS specificitást. Az üzemeltetési bővítés (a Kubernetes és a Docker dokumentációja, manifest- és ütemezés-ellenőrzéssel) akkor következik, amikor a frontend rész már működik; ez forrásokat és eszközöket ad hozzá, nem új architektúrát.
+
+- **Miért releváns a probléma?** A frontend tudás sok, gyorsan változó forrásban van szétszórva: a webplatform referenciájában (MDN), az egyes keretrendszerek és verzióik dokumentációjában, valamint az akadálymentességi irányelvekben. Az általános LLM-ek az ilyen kérdésekre gördülékenyen, de megbízhatatlanul válaszolnak. Kitalálnak API-kat, összekeverik a keretrendszer-verziókat (a Next.js Pages és App Routerét, a Nuxt 2-t és a mostani Nuxtot), valamint az azonos nevű API-kat (a React `useState` hookját és a Nuxt `useState` composable-jét), és nem tudják megmondani, hogy egy funkció működik-e azokban a böngészőkben, amelyeket a projektnek támogatnia kell.
+- **Milyen felhasználói igényt elégít ki?** A fejlesztőknek rövid, helyes, forrásra hivatkozó válasz kell, és pontos eredmény azokra a kérdésekre, amelyekre van ilyen: *működik-e a `:has()` Safari 15-ben?*, *megfelel-e ez a szürke szöveg a WCAG AA szintjének?*, *miért nem érvényesül ez a szabály?* Az asszisztens a hivatalos dokumentáció rögzített verzióiból válaszol, minden állítását forrással támasztja alá, és jelzi, ha a dokumentáció nem fedi le a kérdést.
+- **Miért előnyös rá az agentic RAG megközelítés?** A valódi kérdések magyarázatot és ellenőrzést kevernek, és gyakran több keretrendszert érintenek, ezért egyetlen „visszakeresés, majd generálás” lépés nem elég:
+  - egy olyan kérés, mint a *Hogyan kérek le adatot szerveroldalon Next.js-ben és Nuxtban, és mi a különbség?*, keretrendszerenként egy-egy visszakeresésre bomlik, ezek párhuzamosan futnak, és egyetlen összehasonlításban állnak össze;
+  - amit ki lehet számolni, azt egy eszköz számolja ki, nem a modell találgatja: a `#777777` színű szöveg kontrasztaránya fehér háttéren 4,48:1, éppen az AA szinthez szükséges 4,5:1 alatt, és ezt a különbséget egy modell könnyen eltéveszti;
+  - az ellenőrző lépés a visszakeresett dokumentációhoz méri a választervezetet, és újratervez, ha a tervezet nincs alátámasztva; így a kitalált API-k még azelőtt kiszűrődnek, hogy a felhasználóhoz érnének.
 
 ## Rendszerarchitektúra
 
@@ -109,23 +112,24 @@ A részletes céltervezés (a hét fő node és a routing, a RAG algráf négy l
 
 ## Tervezési döntések
 
-A [projektstruktúra-terv](docs/project-structure-plan.hu.md#3-a-váz-elkészítése-előtt-eldöntendő-kérdések) 1–7. döntése beépült a kódba. Az LLM és az embedding modell (4. és 5. döntés) ideiglenes alapértelmezés, amíg az értékelés és a terheléses teszt meg nem méri őket; a domain, a nem visszakeresési eszköz és a darabolás még nyitott.
+A [projektstruktúra-terv](docs/project-structure-plan.hu.md#3-a-váz-elkészítése-előtt-eldöntendő-kérdések) 1–7. döntése beépült a kódba. A 8–9. döntés, a domain és a nem visszakeresési eszközök, 2026. 10. 02-án született meg; a 2. és a 4. fázisban épülnek be. Az LLM és az embedding modell (4. és 5. döntés) ideiglenes alapértelmezés, amíg az értékelés és a terheléses teszt meg nem méri őket, a darabolást pedig a 2. fázisban hangoljuk.
 
 | Terület | Fő szempontok (trade-offok) | Választás és indoklás |
 |---|---|---|
-| Domain és adatforrás | Relevancia, elérhetőség és licenc, előfeldolgozási igény | *Eldöntendő* (a terv 8. döntése, a 2. fázis előtt) |
-| Nem visszakeresési eszköz | Illeszkedés a domainhez; determinisztikus, helyi és tesztelhető | *Eldöntendő*, a domainnel együtt (9. döntés) |
+| Domain és adatforrás | Relevancia, elérhetőség és licenc, előfeldolgozási igény | **Frontend fejlesztői asszisztens** a hivatalos dokumentáció felett (2. fázis): MDN Web Docs (válogatott rész a CSS-ről, a HTML-ről, az akadálymentességről és a JavaScriptről; a szöveg CC BY-SA 2.5, a kódpéldák CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) és a TypeScript Handbook (CC BY 4.0). Az `agentic-rag ingest --download` rögzített commitokról tölti le őket, a `data/sources.yaml` listája alapján: minden futás ugyanazokat a verziókat indexeli, és a repositoryba nem kerül share-alike licencű szöveg. A dokumentáció verziózott, strukturált, és azokat a kérdéseket fedi le, amelyeket a fejlesztők ténylegesen feltesznek. Az üzemeltetési bővítés (Kubernetes, CC BY 4.0; Docker, Apache 2.0) két újabb bejegyzés ugyanebben a listában |
+| Nem visszakeresési eszközök | Illeszkedés a domainhez; determinisztikus, helyi és tesztelhető | **Három eszköz** (4. fázis): a *böngészőtámogatás* az MDN `browser-compat-data` adatbázisában (CC0, rögzített kiadás) keres meg egy funkciót, és a verzióit a célböngészőkhöz hasonlítja; a *színkontraszt* kiszámolja két szín WCAG 2.x szerinti kontrasztarányát, és hogy megfelel-e az AA és az AAA szintnek normál és nagy szövegméretnél; a *CSS specificitás* a Selectors Level 4 szabályai szerint kiszámolja a szelektorok specificitását, és megmondja, melyik érvényesül. Mindegyik számítás vagy rögzített adatban való keresés, ezért pontosan tesztelhető, és olyan tényeket ad a modellnek, amelyeket az különben találgatna |
 | Csomagkezelés és Python-verzió | Reprodukálható build, az ML stack wheel-lefedettsége, beüzemelési igény | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` elrendezés: a lock fájl minden csomagot rögzít a helyi futtatáshoz és a képfájlhoz egyaránt, az uv maga telepíti a rögzített Pythont, és a 3.12-höz érhető el a legszélesebb wheel-lefedettség a torch és a chromadb számára |
 | LLM | Válaszminőség vs. válaszidő vs. memóriaigény (RAM/VRAM); eszközhívás (tool calling) támogatása; licenc | **`qwen2.5:7b-instruct`**, ideiglenesen: többnyelvű, Apache 2.0 licencű 7B-s instruct modell, amelynek 4 bites változata (kb. 4,7 GB) elfér a fejlesztői gép 8 GB-os VRAM-jában; az értékelés és a terheléses teszt alapján véglegesítjük vagy cseréljük |
 | LLM kiszolgálás | Beüzemelési igény, konténerizálhatóság, áteresztőképesség | **Ollama** (Compose szolgáltatásként vagy a gépen futtatva) és egy **szkriptelt fake provider**: az Ollama HTTP API-t és GPU-támogatást ad anélkül, hogy bármit a képfájlba kellene fordítani; a fake (`LLM_PROVIDER=fake`) a feladatkiírás szerinti dummy LLM, és modell nélkül tartja a teszteket |
 | Eszközhívás módja | Megbízhatóság kis helyi modellekkel vs. a natív eszközhívás rugalmassága | **Strukturált kimenetű tervező + explicit eszköz-node-ok**: a tervező tipizált részfeladatokat ad vissza JSON-ként, amit a kis helyi modellek megbízhatóbban állítanak elő, mint a natív eszközhívást; az eszközök LangChain toolok maradnak, így a `bind_tools` később is lehetséges |
 | Embedding modell | Visszakeresési minőség vs. sebesség; nyelvi lefedettség | **`intfloat/multilingual-e5-small`**, ideiglenesen, helyben, sentence-transformers-szel futtatva: többnyelvű (a magyart is lefedi) és kicsi (384 dimenzió), így CPU-n fut, a GPU pedig az LLM-é marad |
 | Vektoradatbázis | Perzisztencia, metaadat-alapú szűrés, skálázhatóság | **Chroma** perzisztens klienssel a `data/chroma_db/` könyvtárban (Compose-ban nevesített volume): perzisztencia és metaadat-alapú szűrés pickle-deszerializálás nélkül |
-| Darabolás (chunking) | Chunkméret és átfedés vs. visszakeresési pontosság és kontextushossz | *Eldöntendő* a 2. fázisban, az értékelő készleten hangolva; a kód 900 karakteres chunkokkal és 150 karakteres átfedéssel indul |
+| Darabolás (chunking) | Chunkméret és átfedés vs. visszakeresési pontosság és kontextushossz | *A 2. fázisban:* a Markdown szöveget a H2 és H3 fejléceinél vágjuk, a fejlécláncot `section` metaadatként megtartjuk, a kódblokkokat soha nem vágjuk ketté, és csak a túl hosszú szakaszokat daraboljuk tovább a kód 900 karakteres chunkjaival és 150 karakteres átfedésével; az értékelő készleten hangolva |
 
 Megjegyzések az ideiglenes alapértelmezésekhez:
 
-- **Modellek.** Mindkét modell alapértelmezés, nem végleges választás (a terv 4. és 5. döntése): a domain kiválasztása után az értékelés és a terheléses teszt mérései alapján véglegesítjük vagy cseréljük őket. Azt, hogy egy 7B-s modell elég jól kezeli-e a magyar nyelvet, az értékelő készleten ellenőrizzük.
+- **Modellek.** Mindkét modell alapértelmezés, nem végleges választás (a terv 4. és 5. döntése): az értékelés és a terheléses teszt mérései alapján véglegesítjük vagy cseréljük őket. A dokumentáció angol, a kérdések lehetnek magyarok vagy angolok, ezért az értékelő készlet magyar kérdéseket is tartalmaz az angol korpusz felett: ez a többnyelvű E5 modell nyelvek közötti visszakeresését és a 7B-s modell magyar válaszait egyaránt ellenőrzi.
+- **A korpusz terjedelme.** A keretrendszerek dokumentációja verziókat és elavult részeket is kever. A 2. fázis a jelenlegi útmutatókat és API-referenciákat tartja meg, például a Next.js App Routerét, és kihagyja a Pages Routert, a Nuxt Bridge-et és a migrációs útmutatókat. Minden forrás saját könyvtárba kerül a `data/raw/` alatt (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), így minden hivatkozásból látszik, melyik dokumentációból származik, és az azonos nevű API-k nem keverednek.
 - **Embedding.** A fizetős API-k tilalma kizárja a hosztolt embedding API-kat, ezért az embedding helyben fut. Az alapértelmezett modell egyszer töltődik le (kb. 0,5 GB, a Hugging Face cache-be, `HF_HOME`), utána offline működik; néhány másodperc alatt töltődik be, az E5 modellek `query:` / `passage:` előtagjait a kód automatikusan hozzáadja, és CPU-s torch-ot visz a képfájlba (a 2,9 GB-os képfájlból kb. 0,8 GB-ot). Az `EMBEDDING_PROVIDER=fake` determinisztikus, hash-elt szózsák- (bag-of-words) vektorokkal helyettesíti: offline és azonnali, de tisztán lexikális, ezért csak tesztekhez és modell nélküli bemutatókhoz való.
 - **Az index újraépítése.** A különböző modellek vektorai nem összehasonlíthatók: az `EMBEDDING_PROVIDER` vagy az `EMBEDDING_MODEL` módosítása után az indexet újra kell építeni az `agentic-rag ingest --rebuild` paranccsal.
 

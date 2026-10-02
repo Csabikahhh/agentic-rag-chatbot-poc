@@ -4,7 +4,7 @@
 
 > **Status:** proposal, written 2026-10-01. This document plans the *skeleton* of the repository and the order in which to build it. Detailed design (exact prompts, metrics, chunk sizes) is decided while building and recorded in the [README](../README.md) and the other documents in `docs/`.
 >
-> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. The foundation was then reviewed and revised on the same day; those changes are part of section 12 as well. Next: decisions 8–9, then Phase 2. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
+> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. The foundation was then reviewed and revised on the same day; those changes are part of section 12 as well. Decisions 8–9 were made on 2026-10-02 (section 3 and [section 12.6](#126-domain-and-corpus-decisions-89)). Next: Phase 2. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
 
 ## Contents
 
@@ -77,8 +77,8 @@ The recommendations below are the defaults the skeleton is built around. Each fi
 | 5 | Embeddings | `sentence-transformers` in-process / Ollama embeddings / `fastembed` | **`sentence-transformers` via `langchain-huggingface`**, CPU-only torch wheels | Retrieval then works in fake mode without Ollama. Shortlist: `intfloat/multilingual-e5-small` for mixed-language corpora, `BAAI/bge-small-en-v1.5` for English only. Ollama embeddings are the fallback if the image size becomes a problem. |
 | 6 | Vector store | Chroma / FAISS / in-memory | **Chroma**, persistent client, `data/chroma_db/` | Persistence plus metadata filtering, no pickle deserialization, already in `.gitignore`. |
 | 7 | Tool-calling style | native `bind_tools` + `ToolNode` / structured-output planner + explicit tool nodes | **Structured-output planner + explicit nodes** | Small local models are unreliable at native tool calling. A planner that emits a JSON list of typed sub-tasks is robust and still demonstrates autonomous decisions. |
-| 8 | Domain and corpus | — | **Your call**, before Phase 2 | Criteria: a real user need; a small corpus with a clear license (public domain, CC or your own); text that is stable enough for reference answers; a domain where a non-retrieval tool is natural. |
-| 9 | Non-retrieval tool | calculator / date and deadline computation / unit conversion / structured table lookup | Depends on the domain; must be **deterministic and local** | Examples: deadline computation for regulation Q&A, a net/gross calculator for payroll rules, a unit converter for technical manuals. |
+| 8 | Domain and corpus | — | **Decided on 2026-10-02:** a **frontend developer assistant** over the official documentation of MDN Web Docs, React, Vue, Next.js, Nuxt and the TypeScript Handbook; operations (Kubernetes, Docker) as a later extension | Criteria: a real user need; a small corpus with a clear license (public domain, CC or your own); text that is stable enough for reference answers; a domain where a non-retrieval tool is natural. The documentation meets them: a frequent need, open licenses (CC BY 4.0, CC BY-SA 2.5, MIT), stable once pinned to a commit, and questions that combine explanation with checks a tool can compute. |
+| 9 | Non-retrieval tool | calculator / date and deadline computation / unit conversion / structured table lookup | **Decided on 2026-10-02:** three tools: **browser support** (MDN `browser-compat-data`), **WCAG colour contrast** and **CSS specificity** | Each is deterministic and local, and answers a question that has one exact result, which the model would otherwise guess. |
 | 10 | HTTP API layer | none / FastAPI service | **None in the skeleton** | The load test drives the compiled graph directly, which gives a cleaner per-node breakdown. A FastAPI service can be added later as a third Compose component. |
 
 ## 4. Target repository layout
@@ -327,7 +327,7 @@ Each phase ends in a committed state that passes its "done when" check. Phases 6
 
 Progress on 2026-10-01:
 
-- **Phase 0** is partly done: decisions 1–7 are in the README *Design decisions* table (4 and 5 with provisional defaults), decisions 8 and 9 are still open, and the `docs/architecture.md` stub exists.
+- **Phase 0** is done: decisions 1–7 are in the README *Design decisions* table (4 and 5 with provisional defaults), decisions 8 and 9 were added on 2026-10-02 together with the README *Problem statement*, and the `docs/architecture.md` stub exists.
 - **Phase 1** is done: its four checks pass, and `--help` lists `ingest`, `eval`, `loadtest`, `export-graph` and `config`.
 - **Brought forward** into the foundation, built and tested ahead of their phases:
   - from Phase 6: the `Dockerfile`, `compose.yaml`, the GPU override `compose.gpu.yaml` and the README run guide. The image builds and the `app` service runs healthy in fake mode. Still in Phase 6: the entrypoint with the optional ingestion (`INGEST_ON_START`) and the fresh-clone run of the full stack, with the model pulled and the index built;
@@ -375,9 +375,10 @@ Progress on 2026-10-01:
 - **Image size**: torch plus `sentence-transformers` adds ~1 GB even with CPU wheels. Fallback: Ollama embeddings (`nomic-embed-text`, `bge-m3`) and a torch-free image.
 - **GPU in Docker on Windows**: requires the WSL2 backend and a current NVIDIA driver. Fallback: host Ollama via `host.docker.internal`, or CPU inference with a 3B model.
 - **Cold start**: the first Ollama request loads the model (seconds); the load test must include a warm-up phase and report it separately.
-- **Hungarian quality of small models**: if the corpus and questions are Hungarian, prefer a model with explicit multilingual coverage and verify it on the evaluation set before committing to it.
-- **Corpus licensing**: only commit documents whose license allows redistribution; otherwise ship a download command and record the source URLs.
-- **Open**: the final domain and corpus (decision 8), the non-retrieval tool (decision 9), the UI language, and whether a FastAPI service is worth adding as a third Compose component for a more realistic load test.
+- **Hungarian quality of small models**: the corpus is English, but the questions may be Hungarian. The evaluation set therefore includes Hungarian questions, which check both the cross-lingual retrieval of the embedding model and the Hungarian answers of the LLM before either is confirmed.
+- **Corpus licensing**: only commit documents whose license allows redistribution; otherwise ship a download command and record the source URLs. The chosen documentation is downloaded, not committed (section 12.6).
+- **Corpus scope and versions**: the MDN is large, and the framework documentation mixes versions, legacy sections and APIs of the same name (React's `useState` hook and Nuxt's `useState` composable). Phase 2 indexes a curated subset from pinned commits and keeps each source in a directory of its own, so the citations show where an answer comes from.
+- **Open**: the UI language, and whether a FastAPI service is worth adding as a third Compose component for a more realistic load test.
 
 ## 12. Deviations from the plan
 
@@ -440,3 +441,13 @@ Changed after the review:
 - Section 10 says model-dependent checks are skipped when Ollama is unavailable. The live Ollama test is instead deselected by default (`addopts = -m "not ollama"`), so `uv run pytest` reports `1 deselected` and never calls a model; `uv run pytest -m ollama` runs it and skips it when the server is unreachable.
 - Ruff's pydocstyle rules `D1` (google convention) require a docstring on every public module, class and function in `src/`; `tests/` are exempt. Docstrings mark code with double backticks.
 - The cross-cutting contracts now have one canonical description in [architecture.md](architecture.md), while the module docstrings still restate parts of them. Consolidating the docstrings so that each contract is stated once is planned together with Phase 4, when the node bodies replace most of the stub docstrings.
+
+### 12.6 Domain and corpus (decisions 8–9)
+
+Recorded on 2026-10-02, when decisions 8 and 9 were made; the details are planned for Phases 2 and 4.
+
+- **Corpus.** The official documentation of MDN Web Docs (a curated subset), React, Vue, Next.js, Nuxt and the TypeScript Handbook. It is downloaded, not committed: `agentic-rag ingest --download` fetches each source from a pinned commit into a directory of its own under `data/raw/`, as listed in `data/sources.yaml` (repository, commit, paths, license). The download keeps the share-alike text of MDN (CC BY-SA 2.5) out of the repository and makes every run index the same versions; `data/sources.yaml` replaces the per-document list in `data/raw/README.md` that [data/README.md](../data/README.md) asked for.
+- **Formats.** Markdown and MDX, the source formats of the documentation repositories, instead of the PDF, Markdown and plain text of section 5.4. The loaders strip the front matter (keeping the title), MDN's `{{macro}}` calls and the MDX components, and derive each document's public URL for the citations.
+- **Chunking.** Split at the H2 and H3 headings, with the heading path as `section` and every code block whole; only sections longer than the `ChunkingConfig` limit (900 characters, 150 overlap) are split further. This replaces the plain character splitting of section 5.4.
+- **Tools.** Three non-retrieval tools instead of one (section 5.1): browser support, WCAG colour contrast and CSS specificity. The browser-support tool reads a pinned release of `browser-compat-data` (CC0), which the download command fetches with the corpus.
+- **Operations extension.** The Kubernetes (CC BY 4.0) and Docker (Apache 2.0) documentation and their tools (manifest validation, CronJob schedules, resource units) follow once the frontend scope works, as new entries in `data/sources.yaml` and new tools, without changes to the graphs.

@@ -4,7 +4,7 @@
 
 > **Állapot:** javaslat, 2026. 10. 01. Ez a dokumentum a repository *vázát* és a felépítés sorrendjét tervezi meg. A részletes tervezés (konkrét promptok, metrikák, chunkméretek) a megvalósítás során dől el, és a [README](../README.hu.md)-ben, valamint a `docs/` mappa többi dokumentumában rögzítjük.
 >
-> **Haladás:** az 1. fázis 2026. 10. 01-jén elkészült. Vele együtt előre hoztuk a 6. fázis konténeres környezetét (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) és az 5.7. szakasz közös moduljait (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), valamint az állapotsémákat, a Streamlit felület vázát és a 2–8. fázis típusannotált vázait. Az alapokat még aznap átnéztük és javítottuk; ezek a változások is a 12. szakaszban szerepelnek. Következik a 8–9. döntés, majd a 2. fázis. A részletek a [8. szakaszban](#8-felépítési-sorrend) olvashatók, a tervtől való eltérések pedig a [12. szakaszban](#12-eltérések-a-tervtől).
+> **Haladás:** az 1. fázis 2026. 10. 01-jén elkészült. Vele együtt előre hoztuk a 6. fázis konténeres környezetét (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) és az 5.7. szakasz közös moduljait (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), valamint az állapotsémákat, a Streamlit felület vázát és a 2–8. fázis típusannotált vázait. Az alapokat még aznap átnéztük és javítottuk; ezek a változások is a 12. szakaszban szerepelnek. A 8–9. döntés 2026. 10. 02-án született meg (3. szakasz és [12.6. szakasz](#126-domain-és-korpusz-89-döntés)). Következik a 2. fázis. A részletek a [8. szakaszban](#8-felépítési-sorrend) olvashatók, a tervtől való eltérések pedig a [12. szakaszban](#12-eltérések-a-tervtől).
 
 ## Tartalom
 
@@ -77,8 +77,8 @@ Az alábbi ajánlások azok az alapértelmezések, amelyekre a váz épül. A v�
 | 5 | Embedding | `sentence-transformers` folyamaton belül / Ollama embedding / `fastembed` | **`sentence-transformers` a `langchain-huggingface` csomagon át**, CPU-s torch wheelekkel | Így a visszakeresés fake módban, Ollama nélkül is működik. Jelöltek: `intfloat/multilingual-e5-small` vegyes nyelvű korpuszhoz, `BAAI/bge-small-en-v1.5` csak angolhoz. Ha a képfájl mérete gond lesz, az Ollama embedding a tartalék. |
 | 6 | Vektoradatbázis | Chroma / FAISS / memóriabeli | **Chroma**, perzisztens kliens, `data/chroma_db/` | Perzisztencia és metaadat-alapú szűrés, nincs pickle-deszerializálás, már szerepel a `.gitignore`-ban. |
 | 7 | Eszközhívás módja | natív `bind_tools` + `ToolNode` / strukturált kimenetű tervező + explicit tool node-ok | **Strukturált kimenetű tervező + explicit node-ok** | A kis helyi modellek natív eszközhívása megbízhatatlan. Egy tervező, amely tipizált részfeladatok JSON-listáját adja, robusztus, és továbbra is autonóm döntést mutat. |
-| 8 | Domain és korpusz | — | **A te döntésed**, a 2. fázis előtt | Szempontok: valós felhasználói igény; kicsi korpusz tiszta licenccel (public domain, CC vagy saját); kellően stabil szöveg a referenciaválaszokhoz; olyan domain, ahol egy nem visszakeresési eszköz természetes. |
-| 9 | Nem visszakeresési eszköz | kalkulátor / dátum- és határidőszámítás / mértékegység-átváltás / strukturált táblázatos lekérdezés | A domaintől függ; **determinisztikus és helyi** legyen | Példák: határidőszámítás jogszabályi Q&A-hoz, nettó/bruttó kalkulátor bérszabályokhoz, mértékegység-átváltó műszaki kézikönyvekhez. |
+| 8 | Domain és korpusz | — | **Eldőlt 2026. 10. 02-án:** **frontend fejlesztői asszisztens** az MDN Web Docs, a React, a Vue, a Next.js, a Nuxt és a TypeScript Handbook hivatalos dokumentációja felett; az üzemeltetés (Kubernetes, Docker) későbbi bővítés | Szempontok: valós felhasználói igény; kicsi korpusz tiszta licenccel (public domain, CC vagy saját); kellően stabil szöveg a referenciaválaszokhoz; olyan domain, ahol egy nem visszakeresési eszköz természetes. A dokumentáció mindegyiknek megfelel: gyakori igény, nyílt licencek (CC BY 4.0, CC BY-SA 2.5, MIT), commitra rögzítve stabil, és a kérdések a magyarázatot olyan ellenőrzésekkel kombinálják, amelyeket egy eszköz ki tud számolni. |
+| 9 | Nem visszakeresési eszköz | kalkulátor / dátum- és határidőszámítás / mértékegység-átváltás / strukturált táblázatos lekérdezés | **Eldőlt 2026. 10. 02-án:** három eszköz: **böngészőtámogatás** (MDN `browser-compat-data`), **WCAG színkontraszt** és **CSS specificitás** | Mindegyik determinisztikus és helyi, és olyan kérdésre ad választ, amelynek egyetlen pontos eredménye van, és amelyet a modell különben találgatna. |
 | 10 | HTTP API réteg | nincs / FastAPI szolgáltatás | **A vázban nincs** | A terheléses teszt közvetlenül a lefordított gráfot hajtja, ami tisztább node-onkénti bontást ad. Egy FastAPI szolgáltatás később harmadik Compose komponensként hozzáadható. |
 
 ## 4. A repository célstruktúrája
@@ -327,7 +327,7 @@ Minden fázis olyan commitolt állapottal zárul, amely átmegy a saját „kés
 
 Haladás 2026. 10. 01-jén:
 
-- **0. fázis:** részben kész. Az 1–7. döntés szerepel a README *Tervezési döntések* táblázatában (a 4. és az 5. ideiglenes alapértelmezéssel), a 8. és a 9. döntés még nyitott, és elkészült a `docs/architecture.md` csonk.
+- **0. fázis:** kész. Az 1–7. döntés szerepel a README *Tervezési döntések* táblázatában (a 4. és az 5. ideiglenes alapértelmezéssel), a 8. és a 9. döntés 2026. 10. 02-án került be a README *Problémafelvetés* részével együtt, és elkészült a `docs/architecture.md` csonk.
 - **1. fázis:** kész. Mind a négy „kész, ha” ellenőrzése teljesül, és a `--help` kilistázza az `ingest`, `eval`, `loadtest`, `export-graph` és `config` parancsot.
 - **Előre hozva** az alapokba, a saját fázisuk előtt megépítve és tesztelve:
   - a 6. fázisból: a `Dockerfile`, a `compose.yaml`, a `compose.gpu.yaml` GPU override és a README futtatási útmutatója. A képfájl felépül, és az `app` szolgáltatás fake módban egészséges (healthy) állapotban fut. A 6. fázisban marad: a belépési pont az opcionális adatbetöltéssel (`INGEST_ON_START`), valamint a teljes stack futtatása friss klónból, letöltött modellel és felépített indexszel;
@@ -375,9 +375,10 @@ Haladás 2026. 10. 01-jén:
 - **Képfájlméret**: a torch és a `sentence-transformers` CPU-s wheelekkel is ~1 GB-ot ad hozzá. Tartalék: Ollama embedding (`nomic-embed-text`, `bge-m3`) és torch nélküli képfájl.
 - **GPU Dockerben, Windowson**: WSL2 backend és friss NVIDIA driver kell. Tartalék: a gépen futó Ollama a `host.docker.internal` címen, vagy CPU-s inferencia 3B-s modellel.
 - **Hidegindítás**: az első Ollama-kérés betölti a modellt (másodpercek); a terheléses tesztnek bemelegítő szakaszt kell tartalmaznia, és azt külön kell jelentenie.
-- **A kis modellek magyar nyelvi minősége**: ha a korpusz és a kérdések magyarok, kifejezetten többnyelvű lefedettségű modellt érdemes választani, és az értékelő készleten ellenőrizni, mielőtt véglegesítjük.
-- **A korpusz licence**: csak olyan dokumentumot commitolunk, amelynek licence engedi a továbbterjesztést; egyébként letöltő parancs kell, a forrás-URL-ek rögzítésével.
-- **Nyitott**: a végleges domain és korpusz (8. döntés), a nem visszakeresési eszköz (9. döntés), a UI nyelve, és hogy megéri-e egy FastAPI szolgáltatást harmadik Compose komponensként hozzáadni a valósághűbb terheléses teszthez.
+- **A kis modellek magyar nyelvi minősége**: a korpusz angol, de a kérdések lehetnek magyarok. Ezért az értékelő készlet magyar kérdéseket is tartalmaz, amelyek az embedding modell nyelvek közötti visszakeresését és az LLM magyar válaszait egyaránt ellenőrzik, mielőtt bármelyiket véglegesítjük.
+- **A korpusz licence**: csak olyan dokumentumot commitolunk, amelynek licence engedi a továbbterjesztést; egyébként letöltő parancs kell, a forrás-URL-ek rögzítésével. A választott dokumentációt letöltjük, nem commitoljuk (12.6. szakasz).
+- **A korpusz terjedelme és verziói**: az MDN nagy, a keretrendszerek dokumentációja pedig verziókat, elavult részeket és azonos nevű API-kat kever (a React `useState` hookja és a Nuxt `useState` composable-je). A 2. fázis rögzített commitokból egy válogatott részt indexel, és minden forrást saját könyvtárban tart, így a hivatkozásokból látszik, honnan származik egy válasz.
+- **Nyitott**: a UI nyelve, és hogy megéri-e egy FastAPI szolgáltatást harmadik Compose komponensként hozzáadni a valósághűbb terheléses teszthez.
 
 ## 12. Eltérések a tervtől
 
@@ -440,3 +441,13 @@ Az átnézés után változott:
 - A 10. szakasz szerint a modellfüggő ellenőrzések kimaradnak, ha az Ollama nem elérhető. Ehelyett az élő Ollama-tesztet a pytest alapból kihagyja (`addopts = -m "not ollama"`), így az `uv run pytest` `1 deselected` eredményt mutat, és sosem hív modellt; az `uv run pytest -m ollama` futtatja, és kihagyja, ha a szerver nem érhető el.
 - A ruff `D1` pydocstyle-szabályai (google konvenció) az `src/` minden publikus moduljához, osztályához és függvényéhez docstringet követelnek meg; a `tests/` kivétel. A docstringek a kódot dupla backtickkel jelölik.
 - A modulokon átívelő szerződéseknek most egyetlen kanonikus leírása van az [architecture.md](architecture.md) fájlban, a modul-docstringek azonban még részben megismétlik őket. A docstringek összevonását úgy, hogy minden szerződés egyszer szerepeljen, a 4. fázissal együtt tervezzük, amikor a node-ok törzse felváltja a csonkok docstringjeinek nagy részét.
+
+### 12.6 Domain és korpusz (8–9. döntés)
+
+Rögzítve 2026. 10. 02-án, a 8. és a 9. döntés napján; a részletek a 2. és a 4. fázisban készülnek.
+
+- **Korpusz.** Az MDN Web Docs (válogatott rész), a React, a Vue, a Next.js, a Nuxt és a TypeScript Handbook hivatalos dokumentációja. Letöltjük, nem commitoljuk: az `agentic-rag ingest --download` minden forrást egy rögzített commitról tölt le, saját könyvtárba a `data/raw/` alatt, a `data/sources.yaml` listája alapján (repository, commit, útvonalak, licenc). A letöltés távol tartja a repositorytól az MDN share-alike licencű (CC BY-SA 2.5) szövegét, és biztosítja, hogy minden futás ugyanazokat a verziókat indexelje; a `data/sources.yaml` váltja fel a `data/raw/README.md` dokumentumonkénti listáját, amelyet a [data/README.md](../data/README.md) kért.
+- **Formátumok.** Markdown és MDX, a dokumentációs repositoryk forrásformátumai, az 5.4. szakasz PDF, Markdown és sima szöveg formátumai helyett. A loaderek eltávolítják a fájlok elején lévő metaadat-fejlécet (a címet megtartva), az MDN `{{makró}}` hívásait és az MDX komponenseket, és minden dokumentumhoz előállítják a nyilvános URL-jét a hivatkozásokhoz.
+- **Darabolás.** A H2 és H3 fejléceknél vágunk, a fejléclánc `section` metaadatként megmarad, a kódblokkok egészben maradnak; csak a `ChunkingConfig` korlátjánál (900 karakter, 150 karakteres átfedés) hosszabb szakaszokat daraboljuk tovább. Ez váltja fel az 5.4. szakasz egyszerű karakteres darabolását.
+- **Eszközök.** Egy helyett három nem visszakeresési eszköz (5.1. szakasz): böngészőtámogatás, WCAG színkontraszt és CSS specificitás. A böngészőtámogatási eszköz a `browser-compat-data` (CC0) egy rögzített kiadását olvassa, amelyet a letöltő parancs a korpusszal együtt tölt le.
+- **Üzemeltetési bővítés.** A Kubernetes (CC BY 4.0) és a Docker (Apache 2.0) dokumentációja és eszközei (manifest-ellenőrzés, CronJob-ütemezés, erőforrás-mértékegységek) akkor következnek, amikor a frontend rész már működik: új bejegyzésként a `data/sources.yaml`-ban és új eszközökként, a gráfok módosítása nélkül.

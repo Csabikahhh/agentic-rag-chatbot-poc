@@ -15,6 +15,6 @@ Modules:
   evaluable nodes (``NODE_TARGETS``) and ``run_evaluation`` (Phase 7).
 
 The reports share their timestamp and settings snapshot with the load-test report through
-``agentic_rag.reports``. The questions themselves are written in Phase 7, once the domain and
-the corpus are chosen (plan decision 8).
+``agentic_rag.reports``. The questions themselves are written in Phase 7, over the frontend
+documentation corpus (plan decision 8).
 """

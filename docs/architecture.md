@@ -30,7 +30,7 @@ A request takes this path through the target design:
 
 1. The Streamlit UI, or the evaluation or load-test harness, passes the conversation to the compiled main graph as an `AgentInput`: `{"messages": [...]}`.
 2. `analyze_request` classifies the latest message into one of four intents, and the routing sends the request straight to the answer, to a single sub-task, or to the planner.
-3. Sub-tasks run as parallel `Send` workers: `run_rag_subtask` answers a `retrieve` sub-task with the RAG subgraph, through the `search_knowledge_base` tool, and `call_tool` runs a `tool` sub-task with the non-retrieval tool.
+3. Sub-tasks run as parallel `Send` workers: `run_rag_subtask` answers a `retrieve` sub-task with the RAG subgraph, through the `search_knowledge_base` tool, and `call_tool` runs a `tool` sub-task with one of the non-retrieval tools.
 4. `synthesize_answer` drafts an answer from the results of the round, and `verify_answer` checks the draft against them; an unsupported draft goes back to `plan_subtasks`, at most `MAX_RETRIES` times.
 5. `finalize_response` produces the `AgentOutput`: the answer, its sources and the trace of every executed node, the RAG subgraph's nodes included.
 
@@ -39,7 +39,7 @@ A request takes this path through the target design:
 | Main workflow | `agentic_rag.agent` | Seven nodes with conditional routing and a `Send` fan-out |
 | Shared literal types | `agentic_rag.agent.types` | `Intent`, `Verdict` and `SubtaskKind`, without LangGraph imports; `agentic_rag.agent.state` re-exports them |
 | RAG subgraph | `agentic_rag.rag` | Four nodes with their own state; not counted towards the seven |
-| Tools | `agentic_rag.agent.tools` | `search_knowledge_base` and the non-retrieval tool (decision 9) |
+| Tools | `agentic_rag.agent.tools` | `search_knowledge_base` and the three non-retrieval tools (decision 9) |
 | Chat model | `agentic_rag.llm` | `ChatOllama`, or the scripted offline `ScriptedChatModel` |
 | Embeddings | `agentic_rag.embeddings` | sentence-transformers on the CPU, or the offline `HashingEmbeddings` |
 | Ingestion and index | `agentic_rag.ingestion` | Load, split, embed and store the corpus in Chroma |
@@ -137,12 +137,12 @@ The subgraph is compiled as `StateGraph(RagState, input_schema=RagInput, output_
 
 ## Tools
 
-The model does not call the tools natively (decision 7): the planner emits typed `Subtask` records and the nodes run the tools. Both tools are still regular LangChain tools with a name, a description and an argument schema, so a tool-calling model can be bound to them later with `bind_tools`.
+The model does not call the tools natively (decision 7): the planner emits typed `Subtask` records and the nodes run the tools. Every tool is still a regular LangChain tool with a name, a description and an argument schema, so a tool-calling model can be bound to them later with `bind_tools`.
 
 | Tool | Kind | Interface | Status |
 |---|---|---|---|
 | `search_knowledge_base` | Retrieval | `SearchKnowledgeBaseTool`, a `BaseTool` that holds the compiled RAG subgraph (`rag_graph`, a `Runnable[RagInput, RagOutput]`). Argument: `query`, a non-empty, self-contained search query. `response_format="content_and_artifact"`: the content is `RagOutput["context"]`, the artifact the whole `RagOutput` | Name, description and argument schema final; `_run` in Phase 4 |
-| Non-retrieval tool | Action | Chosen with the domain (decision 9). It must be deterministic and local, be a LangChain tool with a precise argument schema, return text, raise `ToolException` for input it cannot handle, and have unit tests of its own. `get_non_retrieval_tools(settings)` returns it | Open; Phase 4 |
+| Non-retrieval tools | Action | Decision 9: *browser support* (a lookup in a pinned release of MDN's `browser-compat-data`, compared with the target browsers), *colour contrast* (the WCAG 2.x contrast ratio and the AA and AAA verdicts) and *CSS specificity* (Selectors Level 4). Each must be deterministic and local, be a LangChain tool with a precise argument schema, return text, raise `ToolException` for input it cannot handle, and have unit tests of its own. `get_non_retrieval_tools(settings)` returns them | Chosen; names and schemas in Phase 4 |
 
 From Phase 4 on, `get_tools(settings, *, rag_graph=None)` returns `[search_knowledge_base, *non-retrieval tools]` (with `rag_graph=None` it builds the subgraph with `build_rag_graph(settings)`), and `build_agent_graph` gives the search tool to `run_rag_subtask` and the non-retrieval tools, by name, to `analyze_request`, `plan_subtasks` and `call_tool`. The tools run synchronously: there is no `_arun` override (see [Execution model](#execution-model)).
 

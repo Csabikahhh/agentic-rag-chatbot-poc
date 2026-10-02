@@ -1,8 +1,8 @@
 """Document loaders: the corpus files in ``DATA_DIR`` become LangChain ``Document`` objects.
 
-First step of the ingestion pipeline (plan section 5.4), planned for Phase 2. The file formats
-are chosen in Phase 2 together with the corpus (plan decision 8); the plan names PDF, Markdown
-and plain text.
+First step of the ingestion pipeline (plan section 5.4), planned for Phase 2. The corpus is
+official frontend documentation (plan decision 8), so the file formats are Markdown and MDX
+(plan section 12.6).
 
 Which files belong to the corpus (:func:`list_corpus_files`):
 

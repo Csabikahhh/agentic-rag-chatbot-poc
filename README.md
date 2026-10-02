@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The agent, the RAG subgraph, the ingestion pipeline and the evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: the open decisions 8–9 of the [project structure plan](docs/project-structure-plan.md) (domain and corpus, non-retrieval tool), then Phase 2 (ingestion and index). Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The agent, the RAG subgraph, the ingestion pipeline and the evaluation and load-test runners are typed skeletons that report the phase they are planned for. The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Next: Phase 2 (corpus download, ingestion and index). Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -38,7 +38,7 @@ Status of each requirement from the brief:
 
 **Problem & data**
 
-- [ ] Real-world problem (domain / use case) with a written justification
+- [x] Real-world problem (domain / use case) with a written justification
 - [ ] Freely chosen text data source, with the focus on quality processing and scalable data integration rather than volume
 
 **Agentic architecture (LangGraph)**
@@ -67,11 +67,14 @@ Status of each requirement from the brief:
 
 ## Problem statement and motivation
 
-> 🚧 *To be completed* — the chosen domain / use case and the goal of the chatbot, answering three questions:
->
-> - **Why is the problem relevant?**
-> - **What user need does it address?**
-> - **Why is an agentic RAG approach a good fit** — compared to a single retrieve-then-generate pass?
+**Use case: a frontend developer assistant.** The chatbot answers questions about web frontend development from the official documentation: HTML, CSS, JavaScript and TypeScript, accessibility, and the React, Vue, Next.js and Nuxt frameworks. Concrete facts are checked with deterministic tools: browser support, colour contrast and CSS specificity. An operations extension (the Kubernetes and Docker documentation, with manifest and schedule checks) follows once the frontend scope works; it adds sources and tools, not a new architecture.
+
+- **Why is the problem relevant?** Frontend knowledge is spread over many sources that change quickly: the web platform reference (MDN), the documentation of each framework and its versions, and the accessibility guidelines. General-purpose LLMs answer such questions fluently but unreliably. They invent APIs, mix up framework versions (the Pages and the App Router of Next.js, Nuxt 2 and the current Nuxt) and APIs of the same name (React's `useState` hook and Nuxt's `useState` composable), and they cannot tell whether a feature works in the browsers a project has to support.
+- **What user need does it address?** Developers need short, correct answers with a link to the source, and exact results for the questions that have one: *does `:has()` work in Safari 15?*, *does this grey text pass WCAG AA?*, *why does this rule not apply?* The assistant answers from pinned versions of the official documentation, cites every claim, and says so when the documentation does not cover a question.
+- **Why is an agentic RAG approach a good fit?** Real questions mix explanation with verification and often span several frameworks, so a single retrieve-then-generate pass falls short:
+  - a request such as *How do I fetch data on the server in Next.js and in Nuxt, and what is the difference?* is split into one retrieval per framework, run in parallel and combined into one comparison;
+  - facts that can be computed are computed by a tool, not guessed by the model: `#777777` text on white has a contrast ratio of 4.48:1, just below the 4.5:1 that AA requires, a margin a model easily gets wrong;
+  - the verification step checks the draft against the retrieved documentation and re-plans when the draft is not supported, which catches invented APIs before they reach the user.
 
 ## System architecture
 
@@ -109,23 +112,24 @@ The detailed target design (the seven main nodes and their routing, the four ste
 
 ## Design decisions
 
-Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. The LLM and the embedding model (decisions 4 and 5) are provisional defaults until the evaluation and the load test have measured them; the domain, the non-retrieval tool and the chunking are still open.
+Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. Decisions 8–9, the domain and the non-retrieval tools, were made on 2026-10-02 and are built in Phases 2 and 4. The LLM and the embedding model (decisions 4 and 5) are provisional defaults until the evaluation and the load test have measured them, and the chunking is tuned in Phase 2.
 
 | Area | Key trade-offs | Choice & rationale |
 |---|---|---|
-| Domain & data source | Relevance, availability and licensing, preprocessing effort | *TBD* (plan decision 8, before Phase 2) |
-| Non-retrieval tool | Fit to the domain; deterministic, local and testable | *TBD* together with the domain (decision 9) |
+| Domain & data source | Relevance, availability and licensing, preprocessing effort | **Frontend developer assistant** over the official documentation (Phase 2): MDN Web Docs (a curated subset on CSS, HTML, accessibility and JavaScript; prose CC BY-SA 2.5, code samples CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) and the TypeScript Handbook (CC BY 4.0). `agentic-rag ingest --download` fetches them from pinned commits, as listed in `data/sources.yaml`: every run indexes the same versions, and no share-alike text enters the repository. The documentation is versioned, structured and covers the questions developers actually ask. The operations extension (Kubernetes, CC BY 4.0; Docker, Apache 2.0) is two more entries in the same list |
+| Non-retrieval tools | Fit to the domain; deterministic, local and testable | **Three tools** (Phase 4): *browser support* looks a feature up in MDN's `browser-compat-data` (CC0, a pinned release) and compares its versions with the target browsers; *colour contrast* computes the WCAG 2.x contrast ratio of two colours and whether it passes AA and AAA for normal and large text; *CSS specificity* computes the specificity of selectors by the Selectors Level 4 rules and tells which one wins. Each is a computation or a lookup in pinned data, so it can be tested exactly, and it gives the model facts it would otherwise guess |
 | Packaging & Python version | Reproducible builds, wheel coverage of the ML stack, setup effort | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` layout: the lock file pins every package for local runs and the image alike, uv installs the pinned Python itself, and 3.12 has the widest wheel coverage for torch and chromadb |
 | LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen2.5:7b-instruct`**, provisional: a multilingual 7B instruct model under the Apache 2.0 license whose 4-bit build (about 4.7 GB) fits in the 8 GB of VRAM of the development machine; confirmed or replaced by the evaluation and the load test |
 | LLM serving | Setup effort, containerization, throughput | **Ollama** (a Compose service, or Ollama on the host) plus a **scripted fake provider**: Ollama gives an HTTP API and GPU support without compiling anything into the image; the fake (`LLM_PROVIDER=fake`) is the brief's dummy LLM and keeps the tests model-free |
 | Tool-calling style | Reliability with small local models vs. flexibility of native tool calling | **Structured-output planner + explicit tool nodes**: the planner emits typed sub-tasks as JSON, which small local models produce more reliably than native tool calls; the tools stay LangChain tools, so `bind_tools` remains possible |
 | Embedding model | Retrieval quality vs. speed; language coverage | **`intfloat/multilingual-e5-small`**, provisional, run locally with sentence-transformers: multilingual (Hungarian included) and small (384 dimensions), so it runs on the CPU and leaves the GPU to the LLM |
 | Vector store | Persistence, metadata filtering, scalability | **Chroma** with a persistent client in `data/chroma_db/` (a named volume in Compose): persistence and metadata filtering without pickle deserialization |
-| Chunking | Chunk size and overlap vs. retrieval precision and context length | *TBD* in Phase 2, tuned against the evaluation set; the code starts from 900-character chunks with a 150-character overlap |
+| Chunking | Chunk size and overlap vs. retrieval precision and context length | *Planned for Phase 2:* split the Markdown at its H2 and H3 headings, keep the heading path as the `section` metadata and every code block whole, and split only the sections that are too long, with the code's 900-character chunks and 150-character overlap; tuned against the evaluation set |
 
 Notes on the provisional defaults:
 
-- **Models.** Both models are defaults, not final choices (plan decisions 4 and 5): they are confirmed or replaced once the domain is chosen and the evaluation and the load test have measured them. Whether a 7B model handles Hungarian well enough is checked on the evaluation set.
+- **Models.** Both models are defaults, not final choices (plan decisions 4 and 5): they are confirmed or replaced once the evaluation and the load test have measured them. The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus: the cross-lingual retrieval of the multilingual E5 model and the Hungarian answers of the 7B model.
+- **Corpus scope.** The framework documentation mixes versions and legacy sections. Phase 2 keeps the current guides and API references, such as the App Router of Next.js, and leaves out the Pages Router, Nuxt Bridge and the migration guides. Every source is stored in a directory of its own under `data/raw/` (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), so every citation shows which documentation it comes from, and APIs of the same name stay apart.
 - **Embeddings.** The no-paid-API rule rules out hosted embedding APIs, so the embeddings run locally. The default model is downloaded once (about 0.5 GB, into the Hugging Face cache, `HF_HOME`) and then works offline; it takes a few seconds to load, its E5 `query:` / `passage:` prefixes are added automatically, and it brings CPU-only torch into the image (about 0.8 GB of the 2.9 GB image). `EMBEDDING_PROVIDER=fake` replaces it with deterministic, hashed bag-of-words vectors: offline and instant, but purely lexical, so only for tests and model-free demos.
 - **Rebuilding the index.** Vectors of different models are not comparable: after changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`, rebuild the index with `agentic-rag ingest --rebuild`.
 
