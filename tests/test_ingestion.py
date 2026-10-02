@@ -16,20 +16,36 @@ from typing import Any, ClassVar
 import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from pydantic import ValidationError
 
 from agentic_rag.config import Settings
 from agentic_rag.embeddings import HashingEmbeddings
 from agentic_rag.errors import ConfigurationError
 from agentic_rag.ingestion import download, index
-from agentic_rag.ingestion.chunking import ChunkingConfig, context_line, split_documents
+from agentic_rag.ingestion.chunking import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CODE_BLOCK_LIMIT,
+    DEFAULT_SEPARATORS,
+    ChunkingConfig,
+    ChunkMetadata,
+    context_line,
+    split_documents,
+)
 from agentic_rag.ingestion.download import DownloadError, download_sources
 from agentic_rag.ingestion.index import (
     EmbeddingMismatchError,
     IndexNotFoundError,
+    IndexStats,
     build_index,
     load_index,
 )
-from agentic_rag.ingestion.loaders import list_corpus_files, load_documents, load_file
+from agentic_rag.ingestion.loaders import (
+    DocumentMetadata,
+    list_corpus_files,
+    load_documents,
+    load_file,
+)
 from agentic_rag.ingestion.markdown import parse_markdown, split_front_matter
 from agentic_rag.ingestion.sources import (
     MANIFEST_NAME,
@@ -40,6 +56,7 @@ from agentic_rag.ingestion.sources import (
     read_manifest,
     sparse_directories,
 )
+from agentic_rag.rag.state import Source
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -988,3 +1005,111 @@ def test_load_index_does_not_create_a_missing_index(settings: Settings) -> None:
     build_index(settings)
     with pytest.raises(IndexNotFoundError):
         load_index(other_embeddings(settings, chroma_collection="another"))
+
+
+# --- data contracts ------------------------------------------------------------------------
+
+
+def valid_index_stats(**changes: Any) -> dict[str, Any]:
+    """Arguments of a valid ``IndexStats``, with ``changes`` applied."""
+    return {
+        "collection": "documents",
+        "chroma_dir": Path("data/chroma_db"),
+        "embedding_provider": "huggingface",
+        "embedding_model": "intfloat/multilingual-e5-small",
+        "files": 3,
+        "documents": 12,
+        "chunks": 40,
+        "rebuilt": True,
+        "duration_ms": 1234.5,
+        **changes,
+    }
+
+
+def test_index_stats_round_trips_through_json() -> None:
+    stats = IndexStats(**valid_index_stats())
+
+    assert IndexStats.model_validate_json(stats.model_dump_json()) == stats
+    assert stats.chunking == ChunkingConfig()
+    assert json.loads(stats.model_dump_json(indent=2))["chunks"] == 40
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("collection", ""),
+        ("embedding_provider", "openai"),
+        ("embedding_model", ""),
+        ("files", -1),
+        ("documents", -1),
+        ("chunks", -1),
+        ("duration_ms", -0.5),
+    ],
+)
+def test_index_stats_rejects_invalid_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        IndexStats(**valid_index_stats(**{field: value}))
+
+
+def test_index_stats_is_immutable() -> None:
+    stats = IndexStats(**valid_index_stats())
+
+    with pytest.raises(ValidationError):
+        stats.chunks = 0  # type: ignore[misc]
+
+
+def test_index_errors_extend_the_builtin_errors() -> None:
+    assert issubclass(IndexNotFoundError, FileNotFoundError)
+    assert issubclass(EmbeddingMismatchError, ValueError)
+
+
+def test_default_chunking_is_inside_the_planned_range() -> None:
+    # Plan section 5.4: start at about 800-1000 characters with 10-20 % overlap.
+    assert 800 <= DEFAULT_CHUNK_SIZE <= 1000
+    assert 0.10 <= DEFAULT_CHUNK_OVERLAP / DEFAULT_CHUNK_SIZE <= 0.20
+    assert ChunkingConfig() == ChunkingConfig(
+        chunk_size=DEFAULT_CHUNK_SIZE,
+        chunk_overlap=DEFAULT_CHUNK_OVERLAP,
+        code_block_limit=DEFAULT_CODE_BLOCK_LIMIT,
+        separators=DEFAULT_SEPARATORS,
+    )
+    assert DEFAULT_CODE_BLOCK_LIMIT == 2 * DEFAULT_CHUNK_SIZE
+    assert DEFAULT_SEPARATORS[-1] == ""
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"chunk_size": 100, "chunk_overlap": 100},
+        {"chunk_size": 100, "chunk_overlap": 150},
+        {"chunk_size": 0},
+        {"chunk_overlap": -1},
+        {"chunk_size": 1000, "code_block_limit": 999},
+        {"separators": ()},
+    ],
+)
+def test_chunking_config_rejects_invalid_values(changes: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        ChunkingConfig(**changes)
+
+
+def test_chunking_config_is_immutable() -> None:
+    config = ChunkingConfig()
+
+    with pytest.raises(ValidationError):
+        config.chunk_size = 10  # type: ignore[misc]
+
+
+def test_document_metadata_keys_are_source_fields() -> None:
+    keys = DocumentMetadata.__required_keys__ | DocumentMetadata.__optional_keys__
+
+    assert keys == {"source", "title", "page", "section", "url"}
+    assert keys <= set(Source.model_fields)
+    assert DocumentMetadata.__required_keys__ == {"source"}
+
+
+def test_chunk_metadata_fills_every_source_field_except_content_and_score() -> None:
+    keys = ChunkMetadata.__required_keys__ | ChunkMetadata.__optional_keys__
+
+    assert ChunkMetadata.__required_keys__ == {"source", "chunk_id"}
+    assert keys - {"start_index"} == set(Source.model_fields) - {"content", "score"}

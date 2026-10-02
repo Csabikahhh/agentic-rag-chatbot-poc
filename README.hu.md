@@ -4,7 +4,7 @@
 
 Agentic RAG (Retrieval-Augmented Generation) alapú chatbot prototípus Pythonban – [LangGraph](https://github.com/langchain-ai/langgraph) frameworkkel, helyben futó, nyílt forráskódú LLM-mel és [Streamlit](https://streamlit.io/) felülettel, Dockerrel teljesen konténerizálva.
 
-> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet. Az ágens, a RAG algráf, valamint az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: mindegyik jelzi, melyik fázisban készül el. Következik a 3. fázis (a RAG algráf). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
+> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2. és a 3. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet, a RAG algráf pedig a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza. A fő workflow, valamint az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: mindegyik jelzi, melyik fázisban készül el. Következik a 4. fázis (a fő workflow és az eszközök). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
 
 ## Tartalom
 
@@ -104,11 +104,16 @@ flowchart LR
 | Helyi LLM | Helyben kiszolgált, nyílt forráskódú modell, fizetős API-k nélkül |
 | Dokumentumindex | A választott szöveges adatforrás feldarabolt (chunking) és beágyazott (embedding) dokumentumai |
 
-A részletes céltervezés (a hét fő node és a routing, a RAG algráf négy lépése, az eszközök), az állapotsémák a kód jelenlegi állapota szerint, a modulokon átívelő szerződések (függőséginjektálás, végrehajtási modell, trace-események, az újratervezési ciklus, a hivatkozások számozása, hibák és kilépési kódok), valamint a konfigurációs referencia a [docs/architecture.md](docs/architecture.md) fájlban található (angolul).
+Ami már elkészült:
 
-> 🚧 *Kitöltendő:* a fő workflow node-jai és routing logikája, a RAG algráf lépései, az eszközök, az állapot (state) sémája és az adatbetöltési (ingestion) folyamat.
+- **Adatbetöltési folyamat:** `data/sources.toml` → ritkított git-letöltés rögzített commitokról → a dialektusok tisztítása, H2/H3 szakaszonként egy dokumentum → szerkezetkövető chunkok kontextussorral → Chroma, amely csak az új vagy megváltozott chunkokat ágyazza be.
+- **RAG algráf** (`rewrite_query` → `retrieve` → `grade_documents` → `build_context`, lineáris): a chatmodell a kérdést egyetlen angol keresőkifejezéssé alakítja, a Chroma visszaadja a `TOP_K` legközelebbi chunkot, egy pontszámküszöb és egyetlen LLM-es értékelőhívás kiszűri a nem relevánsakat, a többiből pedig `[1]`, `[2]`, … hivatkozásjelekkel ellátott kontextus és a hozzájuk tartozó források lesznek. Minden lépés egy trace-eseményt rögzít az időtartamával és egysoros összefoglalóval.
+
+A részletes tervezés (a hét fő node és a routing, a RAG algráf négy lépése a promptokkal és a küszöbökkel, az adatbetöltési folyamat, az eszközök), az állapotsémák a kód jelenlegi állapota szerint, a modulokon átívelő szerződések (függőséginjektálás, végrehajtási modell, trace-események, az újratervezési ciklus, a hivatkozások számozása, hibák és kilépési kódok), valamint a konfigurációs referencia a [docs/architecture.md](docs/architecture.md) fájlban található (angolul).
+
+> 🚧 *Kitöltendő:* a fő workflow node-jai és routing logikája, az eszközök és az állapot (state) sémája (4. fázis).
 >
-> Tipp: az `uv run agentic-rag export-graph` Mermaid formátumban kiírja a lefordított (compiled) gráfokat (a `graph.get_graph(xray=True).draw_mermaid()` segítségével), amint a 3–4. fázisban elkészülnek. A RAG algráf külön diagramot kap: a fő workflow a `run_rag_subtask` node-on belül, a `search_knowledge_base` eszközön keresztül hívja, ahol az `xray=True` nem bontja ki.
+> Tipp: az `uv run agentic-rag export-graph --graph rag` Mermaid formátumban kiírja a lefordított (compiled) RAG algráfot (a `graph.get_graph(xray=True).draw_mermaid()` segítségével); a fő workflow a 4. fázisban következik. A RAG algráf külön diagramot kap: a fő workflow a `run_rag_subtask` node-on belül, a `search_knowledge_base` eszközön keresztül hívja, ahol az `xray=True` nem bontja ki.
 
 ## Tervezési döntések
 
@@ -123,6 +128,7 @@ A [projektstruktúra-terv](docs/project-structure-plan.hu.md#3-a-váz-elkészít
 | LLM kiszolgálás | Beüzemelési igény, konténerizálhatóság, áteresztőképesség | **Ollama** (Compose szolgáltatásként vagy a gépen futtatva) és egy **szkriptelt fake provider**: az Ollama HTTP API-t és GPU-támogatást ad anélkül, hogy bármit a képfájlba kellene fordítani; a fake (`LLM_PROVIDER=fake`) a feladatkiírás szerinti dummy LLM, és modell nélkül tartja a teszteket |
 | Eszközhívás módja | Megbízhatóság kis helyi modellekkel vs. a natív eszközhívás rugalmassága | **Strukturált kimenetű tervező + explicit eszköz-node-ok**: a tervező tipizált részfeladatokat ad vissza JSON-ként, amit a kis helyi modellek megbízhatóbban állítanak elő, mint a natív eszközhívást; az eszközök LangChain toolok maradnak, így a `bind_tools` később is lehetséges |
 | Embedding modell | Visszakeresési minőség vs. sebesség; nyelvi lefedettség | **`intfloat/multilingual-e5-small`**, ideiglenesen, helyben, sentence-transformers-szel futtatva: többnyelvű (a magyart is lefedi) és kicsi (384 dimenzió), így CPU-n fut, a GPU pedig az LLM-é marad |
+| Visszakeresés és szűrés | Teljesség (recall) vs. pontosság; az extra LLM-hívások válaszideje; magyar kérdések angol korpusz felett | **Átírás, keresés, küszöb, LLM-es értékelés** (3. fázis): a chatmodell minden kérdést egyetlen angol keresőkifejezéssé alakít (a többnyelvű embedding önmagában elvétette a magyar kérdéseket, lásd lent: *Nyelvek közötti visszakeresés*); a Chroma visszaadja a `TOP_K` (4) legközelebbi chunkot; egy embedding-providerenkénti pontszámküszöb (E5-nél 0,83, az indexen mérve) kiszűri az egyértelműen idegent; egyetlen strukturált kimenetű hívás együtt értékeli a maradék chunkokat, így visszakeresésenként egy LLM-hívás a költség, nem chunkonként egy, és a `GRADE_WITH_LLM=false` kikapcsolja. Melegen, Ollamával mérve: átírás 100–180 ms, értékelés 290–360 ms, keresés 10–20 ms |
 | Vektoradatbázis | Perzisztencia, metaadat-alapú szűrés, skálázhatóság | **Chroma** perzisztens klienssel a `data/chroma_db/` könyvtárban (Compose-ban nevesített volume): perzisztencia és metaadat-alapú szűrés pickle-deszerializálás nélkül |
 | Darabolás (chunking) | Chunkméret és átfedés vs. visszakeresési pontosság és kontextushossz | **Szerkezetkövető:** a loaderek minden oldalt a H2 és H3 fejléceinél vágnak szakaszokra, a fejlécláncból `section` metaadat lesz. A szakaszokat bekezdéshatárokon legfeljebb 900 karakteres chunkokba csomagoljuk; egy kódblokk 1800 karakterig egyben marad, egy fejléc soha nem zár le chunkot, a rövid záró bekezdések (legfeljebb 150 karakter) pedig a következő chunkban megismétlődnek. Minden chunk egy kontextussorral kezdődik: a cím és a fejlécek (`useState – React > Reference > useState(initialState)`), így egy *Parameters* chunk is megnevezi a tárgyát az embedding modellnek és a promptnak. Eredmény: 18 654 chunk 1160 oldalból, a medián 602 karakter. A méretek az értékelésig (7. fázis) ideiglenesek |
 
@@ -131,7 +137,7 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 - **Modellek.** Mindkét modell alapértelmezés, nem végleges választás (a terv 4. és 5. döntése): az értékelés és a terheléses teszt mérései alapján véglegesítjük vagy cseréljük őket. A dokumentáció angol, a kérdések lehetnek magyarok vagy angolok, ezért az értékelő készlet magyar kérdéseket is tartalmaz az angol korpusz felett: ez a többnyelvű E5 modell nyelvek közötti visszakeresését és a 7B-s modell magyar válaszait egyaránt ellenőrzi.
 - **A korpusz terjedelme.** A keretrendszerek dokumentációja verziókat és elavult részeket is kever. A forráslista a jelenlegi útmutatókat és API-referenciákat tartja meg, például a Next.js App Routerét, és kihagyja a Pages Routert, a Nuxt Bridge-et, a migrációs útmutatókat és az MDN gyártóspecifikus szelektorait: összesen 1160 oldal (MDN 573, Nuxt 172, Next.js 165, React 151, Vue 80, TypeScript 19). Minden forrás saját könyvtárba kerül a `data/raw/` alatt (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), és a neve minden oldal címéhez hozzákerül (`useState – React`, `useState – Nuxt`), így minden hivatkozásból látszik, melyik dokumentációból származik, és az azonos nevű API-k nem keverednek.
 - **Tisztítás.** Minden dokumentáció a saját Markdown-dialektusában íródott. A loaderek az MDN makróit, a React és a Next.js JSX komponenseit, a Vue VitePress-konténereit és a Nuxt MDC komponenseit sima Markdownná alakítják, kihagyják a Next.js oldalak Pages Router blokkjait, a linkeket a szövegükre cserélik, a kódblokkokat pedig szó szerint megtartják (részletek: `src/agentic_rag/ingestion/markdown.py`).
-- **Nyelvek közötti visszakeresés.** Egy első ellenőrzés a felépített indexen megerősíti, hogy egy angol korpusz feletti magyar kérdés kockázatos. Az angol kérdések megtalálják a megfelelő oldalt: a *Which CSS pseudo-class selects a parent element that contains a specific child?* kérdésre az MDN `:has()` oldala az első, a *How do I add state to a React component?* kérdésre pedig a `Component` és a `useState` állapotkezelési szakaszai jönnek. A *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* kérdésre viszont a *Fetching Data* oldal nincs az első három találat között. Ezért a RAG algráf `rewrite_query` lépése (3. fázis) minden kérdést angol keresőkifejezéssé alakít a visszakeresés előtt, a hatását pedig az értékelő készlet méri.
+- **Nyelvek közötti visszakeresés.** Egy első ellenőrzés a felépített indexen megerősíti, hogy egy angol korpusz feletti magyar kérdés kockázatos. Az angol kérdések megtalálják a megfelelő oldalt: a *Which CSS pseudo-class selects a parent element that contains a specific child?* kérdésre az MDN `:has()` oldala az első, a *How do I add state to a React component?* kérdésre pedig a `Component` és a `useState` állapotkezelési szakaszai jönnek. A *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* kérdésre viszont a *Fetching Data* oldal nincs az első három találat között. Ezért a RAG algráf `rewrite_query` lépése (3. fázis) minden kérdést angol keresőkifejezéssé alakít a visszakeresés előtt. Ezzel a kérdésből *How do I fetch data on the server in Next.js App Router?* lesz, és a *Fetching Data* oldalt találja meg; a *How do I create a dynamic route in the Next.js App Router?* kérdés, amely először egy React-oldalt hozott, *next.js app router dynamic route* lesz, és a *Dynamic Route Segments* oldalt találja meg. A hatását további kérdéseken az értékelő készlet (7. fázis) méri.
 - **Embedding.** A fizetős API-k tilalma kizárja a hosztolt embedding API-kat, ezért az embedding helyben fut. Az alapértelmezett modell egyszer töltődik le (kb. 0,5 GB, a Hugging Face cache-be, `HF_HOME`), utána offline működik; néhány másodperc alatt töltődik be, az E5 modellek `query:` / `passage:` előtagjait a kód automatikusan hozzáadja, és CPU-s torch-ot visz a képfájlba (a 2,9 GB-os képfájlból kb. 0,8 GB-ot). Az `EMBEDDING_PROVIDER=fake` determinisztikus, hash-elt szózsák- (bag-of-words) vektorokkal helyettesíti: offline és azonnali, de tisztán lexikális, ezért csak tesztekhez és modell nélküli bemutatókhoz való.
 - **Az index újraépítése.** A különböző modellek vektorai nem összehasonlíthatók: az `EMBEDDING_PROVIDER` vagy az `EMBEDDING_MODEL` módosítása után az indexet újra kell építeni az `agentic-rag ingest --rebuild` paranccsal.
 
@@ -174,6 +180,7 @@ Az alapok és a tudásbázis végponttól végpontig futnak, de a chatbot kérd�
 - a tesztek offline, a fake LLM-mel és a fake embeddinggel átmennek;
 - a parancssori felület kilistázza a parancsait, a `config` kiírja az érvényes beállításokat;
 - az `ingest --download` letölti a korpuszt és felépíti a vektorindexet, a sima `ingest` pedig szinkronban tartja az indexet a korpusszal. A fejlesztői gépen (24 magos CPU) mérve: a letöltés kb. 25 s, az első felépítés kb. 6 perc (a 18 654 chunk beágyazása az alapértelmezett modellel, CPU-n), egy ismételt `ingest` pedig 8 s, mert a változatlan chunkokat nem ágyazza be újra. Egy lekérdezés kb. 10 ms, miután a modell betöltődött (ez kb. 11 s);
+- a RAG algráf az `invoke({"query": ...})` hívásra hivatkozásokkal ellátott kontextust és forrásokat ad vissza. Fake módban kihagyja a modellhívásokat, Ollamával átír és értékel (a Qwen2.5-7B-Instruct modellel, laptop GPU-n mérve, lásd: *Tervezési döntések*). A korpuszon kívüli kérdésre, például a *What is the capital of France?* kérdésre üres kontextus a válasz;
 - az `eval`, a `loadtest` és az `export-graph` kiírja, melyik fázisra van tervezve (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`), és 1-es kilépési kóddal áll le;
 - a Streamlit UI elindul, megjeleníti a konfigurációt, és minden kérdésre azzal az üzenettel felel, hogy az ágens a 4. fázisban készül el. A felhasználó által megállított futás a *Stopped before an answer was produced.* üzenetet kapja, az ágens az új kérdés mellett csak a korábbi megválaszolt kérdéseket kapja meg, a válaszok `$` jelei szövegként jelennek meg (LaTeX nélkül), érvénytelen beállítás vagy olvashatatlan `.env` esetén pedig a chat helyén *Invalid configuration* hiba áll;
 - a képfájl felépül, és az `app` szolgáltatás fake módban egészséges (healthy) állapotban indul.
@@ -219,7 +226,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fájlt, ha a lock fájl nem egyezik a `pyproject.toml`-lal; a képfájl buildje ugyanezt az ellenőrzést használja.
 
-A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `628 passed, 1 deselected` (2026. 10. 02-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
+A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `646 passed, 1 deselected` (2026. 10. 02-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 
@@ -346,6 +353,7 @@ A valódi környezeti változók elsőbbséget élveznek a `.env`-del szemben, a
 | `CHROMA_DIR` | `data/chroma_db` | A vektorindex könyvtára |
 | `CHROMA_COLLECTION` | `documents` | A Chroma kollekció neve: 3–63 karakter (szándékos projektszintű korlát), nem lehet IPv4-cím |
 | `TOP_K` | `4` | Lekérdezésenként visszakeresett chunkok száma |
+| `GRADE_WITH_LLM` | `true` | A chatmodell kiszűri azokat a visszakeresett chunkokat, amelyek nem segítenek a válaszban (visszakeresésenként egy extra LLM-hívás; fake módban nincs hatása) |
 | `MAX_RETRIES` | `2` | Az ellenőrzés → újratervezés ciklus korlátja |
 | `INGEST_ON_START` | `true` | Induláskor felépíti az indexet, ha hiányzik (a 6. fázisig nincs hatása) |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` vagy `ERROR` |
@@ -360,7 +368,7 @@ A Compose stackben a `compose.yaml` az `app` szolgáltatásnak az `OLLAMA_BASE_U
 |---|---|---|
 | `config` | Az érvényes beállítások kiírása `KEY=value` sorokként | Most |
 | `ingest [--rebuild] [--download] [--sources PATH]` | A vektorindex felépítése vagy frissítése a `DATA_DIR` tartalmából; `--download` esetén előbb letölti a korpusz forrásait (git kell hozzá) | Most |
-| `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | A lefordított gráfok Mermaid diagramjai | 3–4. fázis |
+| `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | A lefordított gráfok Mermaid diagramjai | Most a `--graph rag` esetén; a fő workflow a 4. fázisban |
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH]` | Funkcionális értékelés | 7. fázis |
 | `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Terheléses teszt a lefordított gráfon | 8. fázis |
 
@@ -409,10 +417,10 @@ agentic-rag-chatbot-poc/
 │       │   ├── routing.py          # feltételes élek és a Send szétosztás
 │       │   ├── tools.py            # search_knowledge_base és a nem visszakeresési eszköz helye
 │       │   └── graph.py            # NODE_NAMES és build_agent_graph()
-│       ├── rag/                    # RAG algráf (a 3. fázisig váz)
+│       ├── rag/                    # RAG algráf: átírás, visszakeresés, szűrés, hivatkozott kontextus
 │       │   ├── state.py            # RagState, RagInput, RagOutput, Source (kész sémák)
-│       │   ├── nodes.py            # rewrite_query · retrieve · grade_documents · build_context
-│       │   └── graph.py            # RAG_NODE_NAMES és build_rag_graph()
+│       │   ├── nodes.py            # rewrite_query · retrieve · grade_documents · build_context, promptok
+│       │   └── graph.py            # RAG_NODE_NAMES, MIN_SCORES és build_rag_graph()
 │       ├── ingestion/              # adatbetöltés: letöltés, tisztítás, darabolás, beágyazás és tárolás
 │       │   ├── sources.py          # a forráslista, a fájlminták, a manifestek és az oldal-URL-ek
 │       │   ├── download.py         # minden forrás ritkított git checkoutja a rögzített commitról
@@ -439,8 +447,8 @@ agentic-rag-chatbot-poc/
 │   ├── test_ingestion.py           # források, letöltés (helyi git repository), tisztítás, darabolás, index
 │   ├── test_llm.py                 # provider-választás, szkriptelt fake; élő Ollama-ellenőrzés (`ollama` marker, alapból kihagyva)
 │   ├── test_loadtest.py            # percentilisek, válaszidő-összesítések és a riportmodell
+│   ├── test_rag_subgraph.py        # a RAG node-ok helyettesítőkkel; a lefordított algráf egy kis indexen
 │   ├── test_skeletons_agent.py     # a fő workflow váza: node-ok, routing, eszközök, gráf
-│   ├── test_skeletons_rag.py       # a RAG algráf váza; az adatbetöltés adatszerződései
 │   ├── test_state.py               # állapotsémák és reducerek
 │   ├── test_tracing.py             # a lépésnyomkövetés elemei
 │   └── test_ui.py                  # a Streamlit UI AppTest-tel

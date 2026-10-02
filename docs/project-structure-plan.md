@@ -4,7 +4,7 @@
 
 > **Status:** proposal, written 2026-10-01. This document plans the *skeleton* of the repository and the order in which to build it. Detailed design (exact prompts, metrics, chunk sizes) is decided while building and recorded in the [README](../README.md) and the other documents in `docs/`.
 >
-> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. The foundation was then reviewed and revised on the same day; those changes are part of section 12 as well. Decisions 8–9 were made on 2026-10-02 (section 3 and [section 12.6](#126-domain-and-corpus-decisions-89)), and Phase 2 was done the same day. Next: Phase 3. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
+> **Progress:** Phase 1 done on 2026-10-01. Brought forward with it: the container setup of Phase 6 (`Dockerfile`, `compose.yaml`, `compose.gpu.yaml`) and the shared modules of section 5.7 (`config.py`, `llm.py`, `embeddings.py`, `tracing.py`), together with the state contracts, the Streamlit shell and typed skeletons for Phases 2–8. The foundation was then reviewed and revised on the same day; those changes are part of section 12 as well. Decisions 8–9 were made on 2026-10-02 (section 3 and [section 12.6](#126-domain-and-corpus-decisions-89)), and Phases 2 and 3 were done the same day. Next: Phase 4. Details are in [section 8](#8-build-order); the deviations from this plan are recorded in [section 12](#12-deviations-from-the-plan).
 
 ## Contents
 
@@ -276,6 +276,7 @@ One Streamlit entrypoint. Chat with `st.chat_message` / `st.chat_input`; a live 
 | `CHROMA_COLLECTION` | `documents` | Chroma collection name *(added)* |
 | `DATA_DIR` | `data/raw` | corpus location |
 | `TOP_K` | `4` | retrieval depth |
+| `GRADE_WITH_LLM` | `true` | let the chat model drop irrelevant retrieved chunks, one extra LLM call per retrieval *(added in Phase 3)* |
 | `MAX_RETRIES` | `2` | bound on the verify → re-plan loop |
 | `INGEST_ON_START` | `true` | build the index if it is missing when the container starts (no effect until the Phase 6 entrypoint exists) |
 | `LOG_LEVEL` | `INFO` | |
@@ -330,6 +331,7 @@ Progress on 2026-10-01:
 - **Phase 0** is done: decisions 1–7 are in the README *Design decisions* table (4 and 5 with provisional defaults), decisions 8 and 9 were added on 2026-10-02 together with the README *Problem statement*, and the `docs/architecture.md` stub exists.
 - **Phase 1** is done: its four checks pass, and `--help` lists `ingest`, `eval`, `loadtest`, `export-graph` and `config`.
 - **Phase 2** is done (2026-10-02): `python -m agentic_rag ingest --download` downloads the 1 160 pages of the six sources and builds the index (18 654 chunks); queries such as *Which CSS pseudo-class selects a parent element that contains a specific child?* return the expected chunk (MDN's `:has()`) with its source, title, section and URL. The tests are in `tests/test_ingestion.py`. The approach and its deviations from this plan are in [section 12.6](#126-domain-and-corpus-decisions-89).
+- **Phase 3** is done (2026-10-02): `build_rag_graph(settings).invoke({"query": ...})` returns a cited `context`, its `sources` and one trace event per node, in fake mode and with Ollama; `export-graph --graph rag` draws the generated diagram that replaced the hand-drawn one in `docs/architecture.md`. The tests are in `tests/test_rag_subgraph.py`, which replaces `tests/test_skeletons_rag.py`; the ingestion contract tests moved to `tests/test_ingestion.py`. The deviations are in [section 12.7](#127-rag-subgraph-phase-3).
 - **Brought forward** into the foundation, built and tested ahead of their phases:
   - from Phase 6: the `Dockerfile`, `compose.yaml`, the GPU override `compose.gpu.yaml` and the README run guide. The image builds and the `app` service runs healthy in fake mode. Still in Phase 6: the entrypoint with the optional ingestion (`INGEST_ON_START`) and the fresh-clone run of the full stack, with the model pulled and the index built;
   - the shared modules of section 5.7: `config.py`, `llm.py` (`ChatOllama` and the scripted fake model; the fake's rules for the real prompts stay in Phase 4), `embeddings.py` (sentence-transformers and an offline fake) and `tracing.py`;
@@ -438,7 +440,7 @@ Changed after the review:
 
 - Ruff skips `.claude/` (third-party agent and skill files) and does not format `docs/*.md`, whose code snippets are illustrative.
 - The foundation's tests are named after the modules they cover (`test_config.py` … `test_ui.py`). The test files of section 4 (`test_ingestion.py`, `test_rag_subgraph.py`, `test_agent_graph.py`, `test_tools.py`) come with their phases; the `AppTest` tests of the UI are in `tests/test_ui.py` rather than `test_ui_smoke.py`.
-- Section 10 asks for generated diagrams. Until Phases 3–4 build the graphs, `docs/architecture.md` holds hand-drawn target diagrams, labelled as such.
+- Section 10 asks for generated diagrams. The RAG subgraph's diagram is generated (Phase 3); until Phase 4 builds the main workflow, its diagram in `docs/architecture.md` is hand-drawn and labelled as such.
 - Section 10 says model-dependent checks are skipped when Ollama is unavailable. The live Ollama test is instead deselected by default (`addopts = -m "not ollama"`), so `uv run pytest` reports `1 deselected` and never calls a model; `uv run pytest -m ollama` runs it and skips it when the server is unreachable.
 - Ruff's pydocstyle rules `D1` (google convention) require a docstring on every public module, class and function in `src/`; `tests/` are exempt. Docstrings mark code with double backticks.
 - The cross-cutting contracts now have one canonical description in [architecture.md](architecture.md), while the module docstrings still restate parts of them. Consolidating the docstrings so that each contract is stated once is planned together with Phase 4, when the node bodies replace most of the stub docstrings.
@@ -458,3 +460,15 @@ Recorded on 2026-10-02, when decisions 8 and 9 were made and Phase 2 was built; 
 - **Finding for Phase 3.** On the built index, English questions retrieve the expected pages, but a Hungarian question about data fetching in Next.js misses the *Fetching Data* page in the top three: the multilingual E5 model bridges the languages only loosely. The `rewrite_query` node therefore rewrites every question into an English search query, and the evaluation set includes Hungarian questions to measure it.
 - **Tools.** Three non-retrieval tools instead of one (section 5.1): browser support, WCAG colour contrast and CSS specificity. The browser-support tool reads a pinned release of `browser-compat-data` (CC0); Phase 4 adds it to the download.
 - **Operations extension.** The Kubernetes (CC BY 4.0) and Docker (Apache 2.0) documentation and their tools (manifest validation, CronJob schedules, resource units) follow once the frontend scope works, as new entries in `data/sources.toml` and new tools, without changes to the graphs.
+
+### 12.7 RAG subgraph (Phase 3)
+
+Recorded on 2026-10-02, when Phase 3 was built.
+
+- **English rewrite.** `rewrite_query` always asks for one English search query, because the corpus is English and the questions may be Hungarian (finding of section 12.6). It keeps the names of APIs, hooks, components and CSS features as the documentation writes them, and reduces the reply to its first line (no quotes, no `Query:` prefix, no `<think>` block of a reasoning model); an empty or overlong reply keeps the original query. With Ollama, the Hungarian question of section 12.6 is rewritten to *How do I fetch data on the server in Next.js App Router?* and finds the *Fetching Data* page.
+- **One grading call.** `grade_documents` grades all chunks above the threshold in one structured-output call (`RelevanceGrade`, `{"relevant": [1, 3]}`) instead of one call per chunk, so the cost is one LLM call per retrieval. A grade that is not valid JSON keeps every chunk above the threshold.
+- **New setting.** `GRADE_WITH_LLM` (default `true`) turns the LLM grade off, a ready lever for the load test (Phase 8). It is the sixth setting added to section 6.
+- **Thresholds measured on the index, not on the evaluation set.** The evaluation set comes in Phase 7, so `MIN_SCORES` was measured with eight frontend and eight unrelated questions: 0.83 for `intfloat/multilingual-e5-small` (best chunk 0.89–0.93 against 0.72–0.86), 0.0 for the hashing fake, whose groups overlap. Phase 7 measures them again.
+- **Failure handling.** An unusable model reply falls back to the input and logs a warning; errors of the model server propagate, for the main workflow's retry policy.
+- **Trace summaries.** Every RAG node records a one-line summary and small counts as trace metadata (the search query, the number and scores of the chunks, the number of sources), for the evaluation, the load test and a later UI view of the subgraph.
+- **Measured with Ollama** (Qwen2.5-7B-Instruct Q4_K_M, the same model and quantization as the default `qwen2.5:7b-instruct`, laptop RTX 5070, warm): rewrite 100–180 ms, grade 290–360 ms, search 10–20 ms. A single search query covers one subject, so *the difference between Nuxt's and React's useState* retrieves Nuxt pages only: splitting such a question into one retrieval per framework is the main workflow's `plan_subtasks` (Phase 4).

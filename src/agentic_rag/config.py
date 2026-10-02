@@ -155,6 +155,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Number of chunks retrieved per query.",
     )
+    grade_with_llm: bool = Field(
+        default=True,
+        description="Let the chat model drop the retrieved chunks that do not help answer the "
+        "query (one extra LLM call per retrieval). Has no effect with the fake LLM provider.",
+    )
     max_retries: int = Field(
         default=2,
         ge=0,
