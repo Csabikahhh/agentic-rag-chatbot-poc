@@ -81,7 +81,8 @@ REWRITE_INSTRUCTIONS: Final = (
 GRADE_INSTRUCTIONS: Final = (
     "You decide which documentation excerpts help to answer a question.\n"
     "An excerpt is relevant when it explains, defines or shows an example of what the "
-    "question asks about. An excerpt about another framework, or about a different API with a "
+    "question asks about, even if it answers only a part of the question. An excerpt about "
+    "another framework, or about a different API with a "
     "similar name, is not relevant: React's useState hook and Nuxt's useState composable are "
     "different things.\n"
     'Reply with a JSON object of the form {"relevant": [1, 3]} listing the numbers of the '

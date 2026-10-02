@@ -5,7 +5,7 @@ it. The RAG subgraph is not one of them: it runs inside ``run_rag_subtask``, thr
 ``search_knowledge_base`` tool, so it does not count towards the assignment's five nodes, and
 ``agentic-rag export-graph`` draws it as a diagram of its own.
 
-Planned wiring (Phase 4)::
+Wiring::
 
     StateGraph(AgentState, input_schema=AgentInput, output_schema=AgentOutput)
 
@@ -50,19 +50,28 @@ stream_mode=["updates", "values"], version="v2")``, the load test calls ``graph.
 workers of a step in threads. An ``async def`` node would break the sync ``stream``, which
 raises ``TypeError`` for a node without a sync implementation.
 
-Skeleton: :data:`NODE_NAMES` is final; :func:`build_agent_graph` raises
-``agentic_rag.errors.PlannedFeatureError`` until Phase 4 (plan section 8).
+Retries: :data:`RETRY_POLICY` (three attempts with LangGraph's default backoff) applies to the
+four LLM nodes and to ``run_rag_subtask``. LangGraph's default ``retry_on`` retries connection
+and server errors, not programming errors such as ``ValueError``.
 """
 
+import functools
 from typing import Final
 
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import RetryPolicy
 
-from agentic_rag.agent.state import AgentInput, AgentOutput, AgentState
+from agentic_rag.agent import nodes, routing
+from agentic_rag.agent.state import AgentInput, AgentOutput, AgentState, SubtaskInput
+from agentic_rag.agent.tools import SearchKnowledgeBaseTool, get_tools
 from agentic_rag.config import Settings
-from agentic_rag.errors import planned
+from agentic_rag.llm import get_chat_model
 
-__all__ = ["NODE_NAMES", "build_agent_graph"]
+__all__ = ["NODE_NAMES", "RETRY_POLICY", "build_agent_graph"]
+
+RETRY_POLICY: Final = RetryPolicy(max_attempts=3)
+"""Retry policy of the LLM nodes and of ``run_rag_subtask``: transient errors only."""
 
 NODE_NAMES: Final[tuple[str, ...]] = (
     "analyze_request",
@@ -93,9 +102,65 @@ def build_agent_graph(
     Returns:
         The compiled graph. It starts from an ``AgentInput`` (``{"messages": [...]}``) and
         returns the ``AgentOutput`` keys. Its dependencies are bound at build time, so
-        ``invoke`` and ``stream`` need nothing but the input.
-
-    Raises:
-        PlannedFeatureError: Always, until Phase 4.
+        ``invoke`` and ``stream`` need nothing but the input. Building loads no model and
+        opens no index.
     """
-    raise planned(f"{__name__}.build_agent_graph", 4)
+    chat_model = get_chat_model(settings)
+    search_tool, *other_tools = get_tools(settings)
+    if not isinstance(search_tool, SearchKnowledgeBaseTool):
+        msg = "get_tools must return the search tool first"
+        raise TypeError(msg)
+    tools = {tool.name: tool for tool in other_tools}
+
+    builder = StateGraph(AgentState, input_schema=AgentInput, output_schema=AgentOutput)
+    llm_bindings = {"chat_model": chat_model}
+    builder.add_node(
+        "analyze_request",
+        functools.partial(nodes.analyze_request, **llm_bindings, tools=tools),
+        retry_policy=RETRY_POLICY,
+    )
+    builder.add_node(
+        "plan_subtasks",
+        functools.partial(nodes.plan_subtasks, **llm_bindings, tools=tools),
+        retry_policy=RETRY_POLICY,
+    )
+    builder.add_node(
+        "run_rag_subtask",
+        functools.partial(nodes.run_rag_subtask, search_tool=search_tool),
+        input_schema=SubtaskInput,
+        retry_policy=RETRY_POLICY,
+    )
+    builder.add_node(
+        "call_tool", functools.partial(nodes.call_tool, tools=tools), input_schema=SubtaskInput
+    )
+    builder.add_node(
+        "synthesize_answer",
+        functools.partial(nodes.synthesize_answer, **llm_bindings),
+        retry_policy=RETRY_POLICY,
+    )
+    builder.add_node(
+        "verify_answer",
+        functools.partial(nodes.verify_answer, **llm_bindings),
+        retry_policy=RETRY_POLICY,
+    )
+    builder.add_node("finalize_response", nodes.finalize_response)
+
+    builder.add_edge(START, "analyze_request")
+    builder.add_conditional_edges(
+        "analyze_request",
+        routing.route_after_analyze,
+        ["finalize_response", "plan_subtasks", "run_rag_subtask", "call_tool"],
+    )
+    builder.add_conditional_edges(
+        "plan_subtasks", routing.dispatch_subtasks, ["run_rag_subtask", "call_tool"]
+    )
+    builder.add_edge("run_rag_subtask", "synthesize_answer")
+    builder.add_edge("call_tool", "synthesize_answer")
+    builder.add_edge("synthesize_answer", "verify_answer")
+    builder.add_conditional_edges(
+        "verify_answer",
+        functools.partial(routing.route_after_verify, max_retries=settings.max_retries),
+        ["plan_subtasks", "finalize_response"],
+    )
+    builder.add_edge("finalize_response", END)
+    return builder.compile(name="agent")

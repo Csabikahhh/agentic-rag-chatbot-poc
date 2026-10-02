@@ -18,6 +18,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from pydantic import ValidationError
 
+from agentic_rag.agent.compat import BCD_DIRECTORY
 from agentic_rag.config import Settings
 from agentic_rag.embeddings import HashingEmbeddings
 from agentic_rag.errors import ConfigurationError
@@ -107,11 +108,15 @@ def test_the_repository_source_list_is_valid() -> None:
         "nextjs",
         "nuxt",
         "typescript",
+        "browser-compat-data",
     ]
     for source in sources:
         assert source.repository.startswith("https://github.com/")
-        assert source.url is not None and source.url.startswith("https://")
         assert sparse_directories(source), "every source checks out only part of its repository"
+        if source.index:
+            assert source.url is not None and source.url.startswith("https://")
+    # The tool data is downloaded like the corpus but never indexed.
+    assert [source.id for source in sources if not source.index] == [BCD_DIRECTORY]
 
 
 @pytest.mark.parametrize(
@@ -625,7 +630,7 @@ def test_list_corpus_files_skips_dotfiles_dot_directories_and_readmes(tmp_path: 
         "a/z.md",
         "a/b/c.mdx",
         ".gitkeep",
-        "react/.source.json",
+        "react/.hidden.md",
         ".react.download/x.md",
         "README.md",
         "docs/readme",
@@ -645,6 +650,19 @@ def test_list_corpus_files_skips_dotfiles_dot_directories_and_readmes(tmp_path: 
 def test_list_corpus_files_needs_the_directory(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="ingest --download"):
         list_corpus_files(tmp_path / "missing")
+
+
+def test_list_corpus_files_skips_sources_that_are_not_indexed(tmp_path: Path) -> None:
+    install_source(tmp_path, corpus_source(include=["**/*.md"]), {"learn/state.md": "# State\n"})
+    install_source(
+        tmp_path,
+        corpus_source(id="data", include=["**/*.json"], url=None, index=False),
+        {"css/has.json": "{}"},
+    )
+
+    files = list_corpus_files(tmp_path)
+
+    assert [path.relative_to(tmp_path).as_posix() for path in files] == ["react/learn/state.md"]
 
 
 def test_a_downloaded_page_gets_its_source_name_and_url(tmp_path: Path) -> None:

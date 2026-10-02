@@ -214,6 +214,25 @@ def test_rules_see_every_message_of_the_prompt() -> None:
     assert render_prompt(messages) == model.last_prompt
 
 
+def test_an_expanding_rule_fills_in_the_groups_of_its_match() -> None:
+    rule = FakeRule(
+        pattern=r"contrast of (?P<fg>#\w+) on (?P<bg>#\w+)",
+        reply=r'{"foreground": "\g<fg>", "background": "\2"}',
+        expand=True,
+    )
+    model = ScriptedChatModel(rules=[rule])
+
+    assert model.invoke("the contrast of #777 on #fff").content == (
+        '{"foreground": "#777", "background": "#fff"}'
+    )
+
+
+def test_a_plain_rule_keeps_its_reply_literally() -> None:
+    model = scripted((r"(?P<word>\w+)", r"\g<word>"))
+
+    assert model.invoke("anything").content == r"\g<word>"
+
+
 def test_default_reply_is_deterministic_and_configurable() -> None:
     assert ScriptedChatModel().invoke("a").content == DEFAULT_FAKE_REPLY
     assert ScriptedChatModel().invoke("b").content == DEFAULT_FAKE_REPLY

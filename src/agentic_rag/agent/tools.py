@@ -5,37 +5,55 @@ The agent has two kinds of capability, each exposed as a LangChain tool:
 - ``search_knowledge_base`` (:class:`SearchKnowledgeBaseTool`): the only retrieval tool. It
   runs the RAG subgraph for one query (``RagInput`` in, ``RagOutput`` out), and
   ``run_rag_subtask`` executes it for every ``retrieve`` sub-task.
-- The non-retrieval tools: deterministic and local, chosen in decision 9 (browser support,
-  WCAG colour contrast and CSS specificity) and built in Phase 4. :func:`get_non_retrieval_tools`
-  is their placeholder. ``call_tool`` executes one for every ``tool`` sub-task, selected by the
-  name the planner put in ``Subtask.tool_name``.
+- Three non-retrieval tools (decision 9), deterministic and local, which ``call_tool``
+  executes for every ``tool`` sub-task, selected by the name the planner put in
+  ``Subtask.tool_name``:
+
+  - ``check_contrast`` (:class:`CheckContrastTool`): the WCAG 2.x contrast ratio of two CSS
+    colours and the AA and AAA verdicts (``agentic_rag.agent.contrast``);
+  - ``css_specificity`` (:class:`CssSpecificityTool`): the specificity of CSS selectors and
+    which one wins (``agentic_rag.agent.specificity``);
+  - ``browser_support`` (:class:`BrowserSupportTool`): the browser support of a web platform
+    feature from MDN's browser-compat-data, optionally checked against target browsers
+    (``agentic_rag.agent.compat``).
 
 The model does not call the tools natively: the planner emits typed sub-tasks and explicit
 nodes execute them (decision 7), which is more reliable with small local models. The tools
 are still regular LangChain tools with a name, a description and an argument schema, so the
-planner can describe them in its prompt, ``call_tool`` invokes every tool the same way, and a
-tool-calling model can be bound to them later (``bind_tools``) without restructuring.
+planner can describe them in its prompt (``tool_catalog`` in ``agentic_rag.agent.prompts``),
+``call_tool`` invokes every tool the same way, and a tool-calling model can be bound to them
+later (``bind_tools``) without restructuring.
 
-:func:`get_tools` returns the complete tool set for ``build_agent_graph``.
-
-Skeleton: the name, description and argument schema of the search tool are final; executing
-it and building the tool set raise ``agentic_rag.errors.PlannedFeatureError`` until Phase 4
-(plan section 8).
+Every non-retrieval tool returns plain text and raises ``ToolException`` for input it cannot
+handle; ``call_tool`` turns that into a failed ``SubtaskResult``. :func:`get_tools` returns the
+complete tool set for ``build_agent_graph``; building it loads nothing (the browser data is
+read on the first call).
 """
 
 from typing import Final, Literal, override
 
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.runnables import Runnable
-from langchain_core.tools import ArgsSchema, BaseTool
-from pydantic import BaseModel, Field
+from langchain_core.tools import ArgsSchema, BaseTool, ToolException
+from pydantic import BaseModel, ConfigDict, Field
 
+from agentic_rag.agent.compat import BCD_DIRECTORY, BROWSERS, CompatData, parse_target
+from agentic_rag.agent.contrast import evaluate_contrast
+from agentic_rag.agent.specificity import compare_specificity
 from agentic_rag.config import Settings
-from agentic_rag.errors import planned
 from agentic_rag.rag.state import RagInput, RagOutput
 
 __all__ = [
+    "BROWSER_SUPPORT",
+    "CHECK_CONTRAST",
+    "CSS_SPECIFICITY",
     "SEARCH_KNOWLEDGE_BASE",
+    "BrowserSupportInput",
+    "BrowserSupportTool",
+    "CheckContrastInput",
+    "CheckContrastTool",
+    "CssSpecificityInput",
+    "CssSpecificityTool",
     "SearchKnowledgeBaseInput",
     "SearchKnowledgeBaseTool",
     "get_non_retrieval_tools",
@@ -44,6 +62,15 @@ __all__ = [
 
 SEARCH_KNOWLEDGE_BASE: Final = "search_knowledge_base"
 """Name of the retrieval tool, as models and tool messages see it."""
+
+CHECK_CONTRAST: Final = "check_contrast"
+"""Name of the WCAG contrast tool."""
+
+CSS_SPECIFICITY: Final = "css_specificity"
+"""Name of the CSS specificity tool."""
+
+BROWSER_SUPPORT: Final = "browser_support"
+"""Name of the browser-support tool."""
 
 
 class SearchKnowledgeBaseInput(BaseModel):
@@ -68,13 +95,12 @@ class SearchKnowledgeBaseTool(BaseTool):
       "name": ..., "args": {...}}``) returns a ``ToolMessage`` that carries both;
       ``run_rag_subtask`` does this to cite the sources and to forward the subgraph's trace.
 
-    Phase 4 implements ``_run`` with ``rag_graph.invoke`` and does not override ``_arun``.
-    ``run_rag_subtask`` is a sync node, because the UI streams with the sync
-    ``graph.stream``, and under ``ainvoke`` LangGraph runs sync nodes in executor threads, so
-    the tool's sync path is the one that runs. An async path (``_arun`` with
-    ``rag_graph.ainvoke``) would need worker nodes with both a sync and an async
-    implementation, for example ``RunnableLambda(func, afunc=...)``, or a UI that streams
-    with ``astream``.
+    ``_run`` calls ``rag_graph.invoke``; there is no ``_arun`` override. ``run_rag_subtask`` is
+    a sync node, because the UI streams with the sync ``graph.stream``, and under ``ainvoke``
+    LangGraph runs sync nodes in executor threads, so the tool's sync path is the one that
+    runs. An async path (``_arun`` with ``rag_graph.ainvoke``) would need worker nodes with
+    both a sync and an async implementation, for example ``RunnableLambda(func, afunc=...)``,
+    or a UI that streams with ``astream``.
 
     Attributes:
         rag_graph: The compiled RAG subgraph (``agentic_rag.rag.graph.build_rag_graph``), or any
@@ -105,40 +131,234 @@ class SearchKnowledgeBaseTool(BaseTool):
 
         Returns:
             ``(content, artifact)``: the context text and the whole ``RagOutput``.
+        """
+        config = {"callbacks": run_manager.get_child()} if run_manager else None
+        output = self.rag_graph.invoke({"query": query}, config=config)
+        return output["context"], output
+
+
+class CheckContrastInput(BaseModel):
+    """Arguments of ``check_contrast``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    foreground: str = Field(
+        min_length=1,
+        description="The text or icon colour: hex such as #777 or #777777, rgb(), rgba(), "
+        "hsl(), or a basic CSS colour name.",
+    )
+    background: str = Field(
+        min_length=1, description="The opaque colour behind it, in the same formats."
+    )
+
+
+class CheckContrastTool(BaseTool):
+    """WCAG 2.x contrast ratio of two colours, with the AA and AAA verdicts."""
+
+    name: str = CHECK_CONTRAST
+    description: str = (
+        "Compute the WCAG 2.x contrast ratio of a foreground colour on a background colour and "
+        "whether it passes AA and AAA for normal text, large text and UI components."
+    )
+    args_schema: ArgsSchema | None = CheckContrastInput
+
+    @override
+    def _run(
+        self,
+        foreground: str,
+        background: str,
+        run_manager: CallbackManagerForToolRun | None = None,
+    ) -> str:
+        """Evaluate the contrast and describe it.
 
         Raises:
-            PlannedFeatureError: Always, until Phase 4.
+            ToolException: If a colour cannot be read or the background is transparent.
         """
-        raise planned(f"{__name__}.SearchKnowledgeBaseTool._run", 4)
+        try:
+            result = evaluate_contrast(foreground, background)
+        except ValueError as exc:
+            raise ToolException(str(exc)) from exc
+        lines = [
+            f"Contrast ratio {result.ratio:.2f}:1 for {result.foreground.hex} on "
+            f"{result.background.hex} (WCAG 2.2, rounded down)."
+        ]
+        for level, what, minimum, passes in result.verdicts:
+            verdict = "passes" if passes else "fails"
+            lines.append(f"- {level} {what} (at least {minimum:g}:1): {verdict}")
+        lines.append("Large text is at least 24px, or at least 18.66px and bold.")
+        return "\n".join(lines)
+
+
+class CssSpecificityInput(BaseModel):
+    """Arguments of ``css_specificity``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selectors: list[str] = Field(
+        min_length=1,
+        max_length=10,
+        description="The CSS selectors to compare, one per item, written exactly as in the "
+        "stylesheet, for example ['#nav .item', '.menu a:hover'].",
+    )
+
+
+class CssSpecificityTool(BaseTool):
+    """Specificity of CSS selectors by Selectors Level 4, and which one wins."""
+
+    name: str = CSS_SPECIFICITY
+    description: str = (
+        "Compute the specificity (a, b, c) of CSS selectors by the Selectors Level 4 rules, "
+        "including :is(), :not(), :has() and :where(), and tell which selector wins."
+    )
+    args_schema: ArgsSchema | None = CssSpecificityInput
+
+    @override
+    def _run(
+        self, selectors: list[str], run_manager: CallbackManagerForToolRun | None = None
+    ) -> str:
+        """Compute and compare the specificities.
+
+        Raises:
+            ToolException: If a selector cannot be parsed or uses the nesting selector.
+        """
+        try:
+            pairs = compare_specificity(selectors)
+        except ValueError as exc:
+            raise ToolException(str(exc)) from exc
+        lines = [
+            "Specificity (a, b, c): a counts ID selectors; b classes, attribute selectors and "
+            "pseudo-classes; c type selectors and pseudo-elements."
+        ]
+        lines += [f"- `{selector}`: {value}" for selector, value in pairs]
+        if len(pairs) > 1:
+            highest = max(value for _, value in pairs)
+            winners = [selector for selector, value in pairs if value == highest]
+            if len(winners) == 1:
+                lines.append(f"`{winners[0]}` has the highest specificity {highest} and wins.")
+            else:
+                tied = ", ".join(f"`{selector}`" for selector in winners)
+                lines.append(
+                    f"{tied} share the highest specificity {highest}: the one declared later "
+                    "in the stylesheet wins."
+                )
+        lines.append(
+            "Specificity only decides between declarations of the same origin, importance and "
+            "cascade layer: !important, layers and inline styles take precedence."
+        )
+        return "\n".join(lines)
+
+
+class BrowserSupportInput(BaseModel):
+    """Arguments of ``browser_support``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature: str = Field(
+        min_length=1,
+        description="The web platform feature as MDN names it, e.g. ':has()', '@container', "
+        "'<dialog>', 'grid-template-areas', 'Promise.withResolvers', 'fetch', or a "
+        "browser-compat-data id such as css.selectors.has.",
+    )
+    area: Literal["css", "html", "javascript", "api"] | None = Field(
+        default=None, description="Where the feature belongs, when the name is ambiguous."
+    )
+    browsers: list[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Target browsers to check, each a name and a version, e.g. "
+        "['Safari 15', 'Chrome 110']; empty for a summary only.",
+    )
+
+
+class BrowserSupportTool(BaseTool):
+    """Browser support of a web platform feature, from MDN's browser-compat-data.
+
+    Attributes:
+        data: The downloaded browser-compat-data, loaded on the first call.
+    """
+
+    name: str = BROWSER_SUPPORT
+    description: str = (
+        "Look up which browser versions support a web platform feature (a CSS property, "
+        "selector or at-rule, an HTML element or attribute, a JavaScript built-in or a Web "
+        "API) in MDN's browser-compat-data, and check it against target browsers."
+    )
+    args_schema: ArgsSchema | None = BrowserSupportInput
+    data: CompatData = Field(exclude=True)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @override
+    def _run(
+        self,
+        feature: str,
+        area: Literal["css", "html", "javascript", "api"] | None = None,
+        browsers: list[str] | None = None,
+        run_manager: CallbackManagerForToolRun | None = None,
+    ) -> str:
+        """Find the feature and describe its support.
+
+        Raises:
+            ToolException: If the data is missing, the feature is unknown or a target browser
+                cannot be read.
+        """
+        try:
+            matches = self.data.find(feature, area)
+            targets = [parse_target(target) for target in browsers or []]
+        except (FileNotFoundError, ValueError) as exc:
+            raise ToolException(str(exc)) from exc
+        if not matches:
+            msg = (
+                f"No feature named {feature!r} in MDN's browser-compat-data. Use the name as "
+                "MDN writes it, such as ':has()', '<dialog>' or 'grid-template-areas', or a "
+                "browser-compat-data id such as css.selectors.has."
+            )
+            raise ToolException(msg)
+        best = matches[0]
+        lines = [f"Browser support of {best.id} (MDN browser-compat-data):"]
+        lines += [f"- {line}" for line in self.data.summary(best)]
+        status = best.compat.get("status", {})
+        flags = [
+            name.replace("_", " ") for name in ("experimental", "deprecated") if status.get(name)
+        ]
+        if status.get("standard_track") is False:
+            flags.append("non-standard")
+        if flags:
+            lines.append(f"Status: {', '.join(flags)}.")
+        for browser, version in targets:
+            verdict = self.data.check(best, browser, version)
+            outcome = {True: "supported", False: "not supported", None: "unknown"}[
+                verdict.supported
+            ]
+            lines.append(f"{BROWSERS[browser]} {version}: {outcome} ({verdict.detail}).")
+        if best.compat.get("mdn_url"):
+            lines.append(f"MDN: {best.compat['mdn_url']}")
+        if len(matches) > 1:
+            others = ", ".join(match.id for match in matches[1:4])
+            lines.append(f"Other features with this name: {others}.")
+        return "\n".join(lines)
 
 
 def get_non_retrieval_tools(settings: Settings) -> list[BaseTool]:
-    """Return the agent's non-retrieval tools; a placeholder until Phase 4.
+    """Return the agent's non-retrieval tools: contrast, specificity and browser support.
 
-    The assignment requires at least one tool that does something other than retrieval. Plan
-    decision 9 chose three: browser support (a lookup in a pinned release of MDN's
-    ``browser-compat-data``), WCAG colour contrast and CSS specificity. Their names and
-    argument schemas are fixed in Phase 4. Each tool must:
-
-    - be deterministic and local: no network access and no model call inside the tool;
-    - be a LangChain tool (an ``@tool`` function or a ``BaseTool`` subclass) with a precise
-      argument schema, so the planner can fill in ``Subtask.tool_args`` and the arguments are
-      validated before the tool runs;
-    - return text, which becomes ``SubtaskResult.output``, and raise ``ToolException`` for
-      input it cannot handle, which ``call_tool`` turns into a failed result;
-    - come with unit tests of its own.
+    Every tool is deterministic and local: no network access and no model call inside the
+    tool. Each has a precise argument schema, so the planner can fill in ``Subtask.tool_args``
+    and the arguments are validated before the tool runs; each returns text, which becomes
+    ``SubtaskResult.output``, and raises ``ToolException`` for input it cannot handle.
 
     Args:
-        settings: The settings, for a tool that needs configuration (for example a data file
-            under ``settings.data_dir``).
+        settings: The settings; the browser-support tool reads
+            ``settings.data_dir / "browser-compat-data"`` on its first call.
 
     Returns:
-        The non-retrieval tools, with unique names other than ``search_knowledge_base``.
-
-    Raises:
-        PlannedFeatureError: Always, until the tools are built in Phase 4.
+        ``[check_contrast, css_specificity, browser_support]``.
     """
-    raise planned(f"{__name__}.get_non_retrieval_tools", 4)
+    return [
+        CheckContrastTool(),
+        CssSpecificityTool(),
+        BrowserSupportTool(data=CompatData(settings.data_dir / BCD_DIRECTORY)),
+    ]
 
 
 def get_tools(
@@ -158,8 +378,9 @@ def get_tools(
     Returns:
         ``[SearchKnowledgeBaseTool(rag_graph=...), *get_non_retrieval_tools(settings)]``; the
         tool names are unique.
-
-    Raises:
-        PlannedFeatureError: Always, until Phase 4.
     """
-    raise planned(f"{__name__}.get_tools", 4)
+    if rag_graph is None:
+        from agentic_rag.rag.graph import build_rag_graph
+
+        rag_graph = build_rag_graph(settings)
+    return [SearchKnowledgeBaseTool(rag_graph=rag_graph), *get_non_retrieval_tools(settings)]

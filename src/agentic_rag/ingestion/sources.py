@@ -14,7 +14,10 @@
 - ``include`` and ``exclude``: glob patterns that select the files below ``root``;
 - ``url``: the template of a page's public URL (see :meth:`CorpusSource.page_url`);
 - ``strip_order_prefixes``: whether the path in the URL drops numeric ordering prefixes such as
-  ``01-`` or ``3.``, which some documentation sites keep only in their file names.
+  ``01-`` or ``3.``, which some documentation sites keep only in their file names;
+- ``index``: whether the files are text for the knowledge base (the default) or data that a
+  tool reads, such as MDN's browser-compat-data; the loaders skip a source with
+  ``index = false``.
 
 Glob patterns are matched against the whole path relative to ``root``, with forward slashes:
 ``*`` matches within one path segment, ``**/`` any number of directories (also none), and
@@ -79,6 +82,7 @@ class CorpusSource(BaseModel):
         url: Template of a page's public URL, or None when the pages have none.
         strip_order_prefixes: Drop numeric ordering prefixes (``01-``, ``3.``) from the path
             segments that the URL template receives.
+        index: Whether the loaders index the files; False for data that a tool reads.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -93,6 +97,7 @@ class CorpusSource(BaseModel):
     exclude: tuple[str, ...] = ()
     url: str | None = None
     strip_order_prefixes: bool = False
+    index: bool = True
 
     @field_validator("root")
     @classmethod

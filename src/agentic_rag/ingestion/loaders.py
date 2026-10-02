@@ -12,7 +12,9 @@ Which files belong to the corpus (:func:`list_corpus_files`):
 - except dotfiles and everything inside dot-directories (``.gitkeep``, ``.source.json``,
   ``.ipynb_checkpoints/``) and README files (``README``, ``README.md``, ``README.hu.md``, in
   any letter case). README files describe the corpus, for example its sources and licenses,
-  and are not part of it.
+  and are not part of it;
+- and except the source directories whose manifest says ``index = false``: data that a tool
+  reads, such as ``browser-compat-data/``.
 
 A file gives one ``Document`` per section with text (see ``markdown.parse_markdown``). Every
 document carries the cleaned section text as ``page_content`` and :class:`DocumentMetadata`.
@@ -87,7 +89,8 @@ def list_corpus_files(data_dir: Path) -> list[Path]:
     """List the files of the corpus, in a stable order.
 
     Applies the selection rules of the module docstring: all files under ``data_dir``,
-    recursively, except dotfiles, files inside dot-directories and README files.
+    recursively, except dotfiles, files inside dot-directories, README files and the
+    directories of sources that are not indexed.
 
     Args:
         data_dir: The corpus directory, usually ``settings.data_dir``.
@@ -97,6 +100,7 @@ def list_corpus_files(data_dir: Path) -> list[Path]:
 
     Raises:
         FileNotFoundError: If ``data_dir`` does not exist or is not a directory.
+        ValueError: If a source directory has an invalid manifest.
     """
     if not data_dir.is_dir():
         msg = f"Corpus directory not found: {data_dir} (run 'agentic-rag ingest --download')"
@@ -104,6 +108,8 @@ def list_corpus_files(data_dir: Path) -> list[Path]:
     files: list[Path] = []
     for directory, subdirectories, names in os.walk(data_dir):
         subdirectories[:] = [name for name in subdirectories if not name.startswith(".")]
+        if Path(directory) == data_dir:
+            subdirectories[:] = [name for name in subdirectories if _indexed(data_dir / name)]
         for name in names:
             path = Path(directory) / name
             if name.startswith(".") or name.casefold() in _README_NAMES or not path.is_file():
@@ -199,6 +205,12 @@ def _load_file(
             metadata["url"] = url
         documents.append(Document(page_content=section.text, metadata=dict(metadata)))
     return documents
+
+
+def _indexed(directory: Path) -> bool:
+    """Whether a top-level directory of the corpus is indexed: no manifest, or ``index``."""
+    manifest = read_manifest(directory)
+    return manifest is None or manifest.index
 
 
 def _manifest(

@@ -11,8 +11,8 @@ The seven nodes of the main graph (plan section 5.1) share :class:`AgentState`:
 - ``run_rag_subtask`` and ``call_tool`` run once per sub-task: each receives a
   :class:`SubtaskInput` through ``Send`` and appends one :class:`SubtaskResult`.
 - ``synthesize_answer`` reads ``question`` and ``subtask_results`` and writes ``draft_answer``.
-- ``verify_answer`` reads ``draft_answer`` and ``subtask_results`` and writes ``verdict`` and
-  ``retry_count``.
+- ``verify_answer`` reads ``draft_answer`` and ``subtask_results`` and writes ``verdict``,
+  ``retry_count`` and ``critique`` (what a rejected draft is missing, for the re-plan).
 - ``finalize_response`` writes ``answer``, ``sources`` and the assistant message.
 
 The graph is compiled as ``StateGraph(AgentState, input_schema=AgentInput,
@@ -214,6 +214,11 @@ class AgentState(TypedDict, total=False):
         draft_answer: Answer candidate written by ``synthesize_answer`` (by ``analyze_request``
             on the ``direct`` route).
         verdict: Outcome of ``verify_answer``; ``None`` or absent before verification.
+        critique: What ``verify_answer`` found missing or unsupported in the draft; empty
+            when the draft is grounded. ``plan_subtasks`` targets it on a re-plan, and
+            ``finalize_response`` names it when the answer stays partial.
+        language: The language of the latest user message, named in English (``Hungarian``),
+            written by ``analyze_request``; ``synthesize_answer`` answers in it.
         retry_count: Number of re-plans so far, written by ``verify_answer`` and bounded by
             ``Settings.max_retries``.
         answer: Final answer written by ``finalize_response``.
@@ -228,6 +233,8 @@ class AgentState(TypedDict, total=False):
     subtask_results: Annotated[list[SubtaskResult], operator.add]
     draft_answer: str
     verdict: Verdict | None
+    critique: str
+    language: str
     retry_count: int
     answer: str
     sources: list[Source]

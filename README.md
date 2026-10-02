@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 and 3 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index, and the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context. The main workflow and the evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 4 (the main workflow and the tools). Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2, 3 and 4 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it. The evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 5 (the UI against the real graph), then the evaluation. Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -43,12 +43,12 @@ Status of each requirement from the brief:
 
 **Agentic architecture (LangGraph)**
 
-- [ ] Agentic workflow with at least 5 nodes
-- [ ] Autonomous decision-making (e.g. conditional routing)
-- [ ] Decomposition into sub-tasks and their independent execution
-- [ ] State management for storing intermediate results
-- [ ] At least 2 tools, at least one of which is not purely retrieval-based
-- [ ] Dedicated, modular RAG subgraph callable from the main workflow (not counted towards the node count)
+- [x] Agentic workflow with at least 5 nodes
+- [x] Autonomous decision-making (e.g. conditional routing)
+- [x] Decomposition into sub-tasks and their independent execution
+- [x] State management for storing intermediate results
+- [x] At least 2 tools, at least one of which is not purely retrieval-based
+- [x] Dedicated, modular RAG subgraph callable from the main workflow (not counted towards the node count)
 
 **Model, UI & deployment**
 
@@ -73,7 +73,7 @@ Status of each requirement from the brief:
 - **What user need does it address?** Developers need short, correct answers with a link to the source, and exact results for the questions that have one: *does `:has()` work in Safari 15?*, *does this grey text pass WCAG AA?*, *why does this rule not apply?* The assistant answers from pinned versions of the official documentation, cites every claim, and says so when the documentation does not cover a question.
 - **Why is an agentic RAG approach a good fit?** Real questions mix explanation with verification and often span several frameworks, so a single retrieve-then-generate pass falls short:
   - a request such as *How do I fetch data on the server in Next.js and in Nuxt, and what is the difference?* is split into one retrieval per framework, run in parallel and combined into one comparison;
-  - facts that can be computed are computed by a tool, not guessed by the model: `#777777` text on white has a contrast ratio of 4.48:1, just below the 4.5:1 that AA requires, a margin a model easily gets wrong;
+  - facts that can be computed are computed by a tool, not guessed by the model: `#777777` text on white has a contrast ratio of 4.47:1, just below the 4.5:1 that AA requires, a margin a model easily gets wrong;
   - the verification step checks the draft against the retrieved documentation and re-plans when the draft is not supported, which catches invented APIs before they reach the user.
 
 ## System architecture
@@ -109,22 +109,23 @@ The parts that are built:
 - **Ingestion pipeline:** `data/sources.toml` → sparse git download at pinned commits → dialect cleaning and one document per H2/H3 section → structure-aware chunks with a context line → Chroma, where only new or changed chunks are embedded.
 - **RAG subgraph** (`rewrite_query` → `retrieve` → `grade_documents` → `build_context`, linear): the chat model rewrites the question into one English search query, Chroma returns the `TOP_K` closest chunks, a score threshold and one LLM grading call drop the irrelevant ones, and the rest becomes a context with the citation markers `[1]`, `[2]`, … and the matching sources. Every step records a trace event with its duration and a one-line summary.
 
+- **Main workflow** (seven nodes): `analyze_request` classifies the message (`direct`, `single`, `tool`, `complex`); a single question goes straight to one search, a tool question to one tool call, and a complex one to `plan_subtasks`, which plans up to five independent sub-tasks that LangGraph runs in parallel (`Send`); `synthesize_answer` writes a cited answer from the results, `verify_answer` checks it and re-plans what is missing at most `MAX_RETRIES` times, and `finalize_response` returns the answer, its numbered sources and the verbatim tool outputs.
+- **Tools:** `search_knowledge_base` (the RAG subgraph), `check_contrast` (WCAG 2.2 contrast), `css_specificity` (Selectors Level 4) and `browser_support` (MDN browser-compat-data, pinned).
+
 The detailed design (the seven main nodes and their routing, the four steps of the RAG subgraph with their prompts and thresholds, the ingestion pipeline, the tools), the state contracts as they exist in the code, the cross-cutting contracts (dependency injection, the execution model, trace events, the re-plan loop, citation numbering, errors and exit codes) and the configuration reference are in [docs/architecture.md](docs/architecture.md).
 
-> 🚧 *To be completed:* the main workflow's nodes and routing logic, the tools and the state schema (Phase 4).
->
-> Tip: `uv run agentic-rag export-graph --graph rag` prints the compiled RAG subgraph as Mermaid (through `graph.get_graph(xray=True).draw_mermaid()`); the main workflow follows in Phase 4. The RAG subgraph gets a diagram of its own: the main workflow calls it inside the `run_rag_subtask` node, through the `search_knowledge_base` tool, where `xray=True` does not expand it.
+> Tip: `uv run agentic-rag export-graph` prints both compiled graphs as Mermaid (through `graph.get_graph(xray=True).draw_mermaid()`); the diagrams in [docs/architecture.md](docs/architecture.md) are generated this way. The RAG subgraph gets a diagram of its own: the main workflow calls it inside the `run_rag_subtask` node, through the `search_knowledge_base` tool, where `xray=True` does not expand it.
 
 ## Design decisions
 
-Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. Decisions 8–9, the domain and the non-retrieval tools, were made on 2026-10-02: the corpus and its ingestion are built (Phase 2), the tools follow in Phase 4. The LLM and the embedding model (decisions 4 and 5) and the chunking parameters are provisional until the evaluation and the load test have measured them.
+Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. Decisions 8–9, the domain and the non-retrieval tools, were made on 2026-10-02: the corpus and its ingestion (Phase 2) and the tools (Phase 4) are built. The LLM and the embedding model (decisions 4 and 5) and the chunking parameters are provisional until the evaluation and the load test have measured them.
 
 | Area | Key trade-offs | Choice & rationale |
 |---|---|---|
 | Domain & data source | Relevance, availability and licensing, preprocessing effort | **Frontend developer assistant** over the official documentation (Phase 2): MDN Web Docs (a curated subset on CSS, HTML, accessibility and JavaScript; prose CC BY-SA 2.5, code samples CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) and the TypeScript Handbook (CC BY 4.0). `agentic-rag ingest --download` fetches them from pinned commits, as listed in `data/sources.toml`: every run indexes the same versions, and no share-alike text enters the repository. The documentation is versioned, structured and covers the questions developers actually ask. The operations extension (Kubernetes, CC BY 4.0; Docker, Apache 2.0) is two more entries in the same list |
-| Non-retrieval tools | Fit to the domain; deterministic, local and testable | **Three tools** (Phase 4): *browser support* looks a feature up in MDN's `browser-compat-data` (CC0, a pinned release) and compares its versions with the target browsers; *colour contrast* computes the WCAG 2.x contrast ratio of two colours and whether it passes AA and AAA for normal and large text; *CSS specificity* computes the specificity of selectors by the Selectors Level 4 rules and tells which one wins. Each is a computation or a lookup in pinned data, so it can be tested exactly, and it gives the model facts it would otherwise guess |
+| Non-retrieval tools | Fit to the domain; deterministic, local and testable | **Three tools** (Phase 4), `browser_support`, `check_contrast` and `css_specificity`: *browser support* looks a feature up in MDN's `browser-compat-data` (CC0, downloaded at a pinned commit like the corpus, as a source with `index = false`), resolves BCD's `mirror` statements and compares the versions with the target browsers; *colour contrast* computes the WCAG 2.x contrast ratio of two colours and whether it passes AA and AAA for normal and large text; *CSS specificity* computes the specificity of selectors by the Selectors Level 4 rules and tells which one wins. Each is a computation or a lookup in pinned data, so it can be tested exactly, and it gives the model facts it would otherwise guess |
 | Packaging & Python version | Reproducible builds, wheel coverage of the ML stack, setup effort | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` layout: the lock file pins every package for local runs and the image alike, uv installs the pinned Python itself, and 3.12 has the widest wheel coverage for torch and chromadb |
-| LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen2.5:7b-instruct`**, provisional: a multilingual 7B instruct model under the Apache 2.0 license whose 4-bit build (about 4.7 GB) fits in the 8 GB of VRAM of the development machine; confirmed or replaced by the evaluation and the load test |
+| LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen2.5:7b-instruct`**, provisional: a multilingual 7B instruct model under the Apache 2.0 license whose 4-bit build (about 4.7 GB) fits in the 8 GB of VRAM of the development machine; confirmed or replaced by the evaluation and the load test. First live runs (Phase 4): with few-shot prompts the routing, the decomposition and the tool calls work, but its Hungarian is weak: a misstated tool verdict, a verification that let it through, an answer that drifted into Chinese; the answer therefore always shows the tool output verbatim, and the evaluation measures the Hungarian quality |
 | LLM serving | Setup effort, containerization, throughput | **Ollama** (a Compose service, or Ollama on the host) plus a **scripted fake provider**: Ollama gives an HTTP API and GPU support without compiling anything into the image; the fake (`LLM_PROVIDER=fake`) is the brief's dummy LLM and keeps the tests model-free |
 | Tool-calling style | Reliability with small local models vs. flexibility of native tool calling | **Structured-output planner + explicit tool nodes**: the planner emits typed sub-tasks as JSON, which small local models produce more reliably than native tool calls; the tools stay LangChain tools, so `bind_tools` remains possible |
 | Embedding model | Retrieval quality vs. speed; language coverage | **`intfloat/multilingual-e5-small`**, provisional, run locally with sentence-transformers: multilingual (Hungarian included) and small (384 dimensions), so it runs on the CPU and leaves the GPU to the LLM |
@@ -182,7 +183,8 @@ The foundation and the knowledge base run end to end, but the chatbot does not a
 - `ingest --download` downloads the corpus and builds the vector index, and a plain `ingest` keeps the index in step with the corpus. Measured on the development machine (24-core CPU): the download takes about 25 s, the first build about 6 minutes (embedding the 18 654 chunks with the default model on the CPU), and a repeated `ingest` 8 s, because unchanged chunks are not embedded again. A query against the index takes about 10 ms after the model has loaded (about 11 s);
 - the RAG subgraph answers `invoke({"query": ...})` with a cited context and its sources. In fake mode it skips the model calls; with Ollama it rewrites and grades (measured with Qwen2.5-7B-Instruct on a laptop GPU, see *Design decisions*). A question outside the corpus, such as *What is the capital of France?*, gets an empty context;
 - `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
-- the Streamlit UI starts, shows the configuration and answers every question with a notice that the agent is planned for Phase 4. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
+- the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. Measured with Qwen2.5-7B-Instruct on a laptop GPU, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
+- the Streamlit UI streams the main workflow: the step panel shows the steps, parallel ones grouped, and the retrieved-context panel the numbered sources. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - the image builds, and the `app` service starts healthy in fake mode.
 
 ### Local development with uv
@@ -226,7 +228,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `646 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `757 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -368,7 +370,7 @@ In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` 
 |---|---|---|
 | `config` | Print the effective settings as `KEY=value` lines | Now |
 | `ingest [--rebuild] [--download] [--sources PATH]` | Build or update the vector index from `DATA_DIR`; with `--download`, first download the corpus sources (needs git) | Now |
-| `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | Mermaid diagrams of the compiled graphs | Now for `--graph rag`; the main workflow in Phase 4 |
+| `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | Mermaid diagrams of the compiled graphs | Now |
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH]` | Functional evaluation | Phase 7 |
 | `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Load test against the compiled graph | Phase 8 |
 
@@ -391,7 +393,8 @@ agentic-rag-chatbot-poc/
 ├── data/
 │   ├── README.md                   # data layout, corpus rules, when to rebuild the index
 │   ├── sources.toml                # the corpus sources: repositories, pinned commits, patterns, licenses
-│   ├── raw/                        # downloaded corpus (DATA_DIR), one directory per source; gitignored
+│   ├── raw/                        # downloaded corpus (DATA_DIR), one directory per source, and the
+│   │                               #   browser-compat-data of the browser_support tool; gitignored
 │   └── eval/
 │       ├── README.md               # evaluation question-set schema and report formats
 │       └── results/                # committed evaluation and load-test reports; only .gitkeep until Phase 7
@@ -410,12 +413,16 @@ agentic-rag-chatbot-poc/
 │       ├── embeddings.py           # embedding factory: sentence-transformers, or offline hashing
 │       ├── tracing.py              # TraceEvent and the @traced node decorator
 │       ├── reports.py              # RESULTS_DIR; RunReport, the base of EvalReport and LoadTestReport
-│       ├── agent/                  # main agentic workflow (skeleton until Phase 4)
+│       ├── agent/                  # main agentic workflow
 │       │   ├── types.py            # Intent, Verdict, SubtaskKind, without LangGraph
-│       │   ├── state.py            # AgentState, Subtask, SubtaskResult (implemented contracts)
+│       │   ├── state.py            # AgentState, Subtask, SubtaskResult
+│       │   ├── prompts.py          # the four prompts, their output schemas, the tool catalog
 │       │   ├── nodes.py            # the seven node functions
 │       │   ├── routing.py          # conditional edges and the Send fan-out
-│       │   ├── tools.py            # search_knowledge_base and the non-retrieval tool placeholder
+│       │   ├── tools.py            # search_knowledge_base and the three non-retrieval tools
+│       │   ├── contrast.py         # WCAG 2.2 contrast ratio and verdicts
+│       │   ├── specificity.py      # Selectors Level 4 specificity
+│       │   ├── compat.py           # browser support from MDN browser-compat-data
 │       │   └── graph.py            # NODE_NAMES and build_agent_graph()
 │       ├── rag/                    # RAG subgraph: rewrite, retrieve, grade, build the cited context
 │       │   ├── state.py            # RagState, RagInput, RagOutput, Source (implemented contracts)
@@ -443,13 +450,14 @@ agentic-rag-chatbot-poc/
 │   ├── test_cli.py                 # commands, options and exit codes
 │   ├── test_config.py              # defaults, environment and .env handling, validation, logging
 │   ├── test_embeddings.py          # offline fake and Hugging Face branch, without downloads
+│   ├── test_agent_graph.py         # main workflow: contract, routing, nodes, every route in fake mode
 │   ├── test_evaluation.py          # dataset loader, metrics and report models
 │   ├── test_ingestion.py           # sources, download (local git repository), cleaning, chunking, index
 │   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`, deselected by default)
 │   ├── test_loadtest.py            # percentiles, latency summaries and the report model
 │   ├── test_rag_subgraph.py        # RAG nodes with stand-ins; the compiled subgraph on a small index
-│   ├── test_skeletons_agent.py     # main workflow skeleton: nodes, routing, tools, graph
 │   ├── test_state.py               # state contracts and reducers
+│   ├── test_tools.py               # contrast, specificity, browser support and the tool layer
 │   ├── test_tracing.py             # step-trace primitives
 │   └── test_ui.py                  # Streamlit UI under AppTest
 ├── .dockerignore                   # build-context allowlist
