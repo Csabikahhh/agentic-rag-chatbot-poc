@@ -128,12 +128,26 @@ The subgraph is compiled as `StateGraph(RagState, input_schema=RagInput, output_
 
 ## Ingestion and index
 
-`agentic_rag.ingestion` (Phase 2) loads the corpus in `DATA_DIR`, splits it and stores the chunks in the Chroma collection `CHROMA_COLLECTION` in `CHROMA_DIR`.
+`agentic_rag.ingestion` (Phase 2, implemented) downloads the corpus into `DATA_DIR`, cleans and splits it and stores the chunks in the Chroma collection `CHROMA_COLLECTION` in `CHROMA_DIR`. `agentic-rag ingest [--download]` runs the pipeline.
 
-- **Documents and chunks.** The loaders attach `DocumentMetadata`: `source` (the path relative to `DATA_DIR` with forward slashes, or a URL), `title`, `page` and `section`. Chroma accepts only `str`, `int`, `float` and `bool` metadata values (or lists of them), so unknown values are left out instead of being stored as `None`. Each chunk adds `chunk_id` and `start_index`; the id is derived from the chunk's source, position and text, so an unchanged file gives the same ids and an edit gives new ids to the chunks it changes or shifts.
-- **Reconciliation.** `build_index(settings, *, rebuild=False)` leaves the collection with exactly the chunks of the current corpus. It upserts every chunk the run produced, under its `chunk_id`, and once the upsert has succeeded it deletes every stored id the run did not produce (the set difference). Both steps send batches of at most the client's maximum batch size (5461 in chromadb 1.5.9). This handles added, edited, shortened, re-chunked and removed files; a run that fails never removes chunks, and an unchanged corpus leaves the collection as it was, so `agentic-rag ingest` is idempotent. `IndexStats.chunks` is the number of chunks the run produced, which is also the size of the collection afterwards.
-- **Rebuild.** `agentic-rag ingest --rebuild` deletes the collection first. It is needed only after changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`: the collection records both, and a plain run or `load_index` with another model raises `EmbeddingMismatchError`.
-- **Opening the index.** `load_index(settings)` opens the existing collection without creating it (`IndexNotFoundError` when it is missing). Apart from the embedding model nothing is loaded up front; the RAG subgraph calls it once per compiled graph, on its first query.
+```mermaid
+flowchart LR
+    toml[("data/sources.toml")] --> dl["download.py<br/>sparse git checkout<br/>at the pinned commit"]
+    dl --> raw[("DATA_DIR/&lt;id&gt;/<br/>+ .source.json")]
+    raw --> md["loaders.py + markdown.py<br/>clean the dialect,<br/>one Document per section"]
+    md --> ch["chunking.py<br/>blocks → chunks<br/>+ context line"]
+    ch --> ix["index.py<br/>embed new chunks,<br/>delete stale ids"]
+    ix --> chroma[("Chroma collection")]
+```
+
+*Hand-drawn; the pipeline is plain functions, not a graph.*
+
+- **Sources and download.** `data/sources.toml` lists the sources (`sources.CorpusSource`): a git repository, a pinned commit, a root directory, `include` and `exclude` glob patterns, the license, a short name and a URL template. `download.download_sources` fetches each source with a shallow, blob-less fetch of the one commit and a cone-mode sparse checkout of the directories the patterns can match, copies the selected files into `DATA_DIR/<id>/` through a staging directory, and writes the source there as `.source.json` (the manifest). A source whose manifest matches is skipped. A failed source keeps its previous directory and raises `DownloadError`; an invalid source list raises `ConfigurationError`. The download needs git and writes to `DATA_DIR`, so it runs on the host.
+- **Documents.** `loaders.load_documents` reads every Markdown, MDX and text file of the corpus (README files and dotfiles excluded; any other file stops the run with a `ValueError`). `markdown.parse_markdown` removes the front matter and cleans the dialect of each documentation set (MDN macros, JSX components, VitePress containers, MDC components, HTML tags outside code; code blocks verbatim) and splits the page at its H2 and H3 headings. Each section with text becomes one document with `DocumentMetadata`: `source` (the path relative to `DATA_DIR` with forward slashes), `title`, `section` (the headings joined with ` > `) and, from the manifest, `url`; the source's name is added to the title (`useState – React`). `page` stays in the contract for paged formats, which this corpus does not have. Chroma accepts only `str`, `int`, `float` and `bool` metadata values (or lists of them), so unknown values are left out instead of being stored as `None`.
+- **Chunks.** `chunking.split_documents` divides a section into paragraphs, heading lines and code blocks and packs them into chunks of up to `chunk_size` (900) characters; a code block stays whole up to `code_block_limit` (1 800), a heading moves to the chunk of the text it introduces, and only longer blocks are split by `RecursiveCharacterTextSplitter`. Every chunk starts with a context line, `title > section`, followed by a verbatim slice of the section; `start_index` is the slice's offset in the section. `chunk_id` is a hash of the metadata, the position and the text, so an unchanged file gives the same ids and an edit gives new ids to the chunks it changes or shifts.
+- **Reconciliation.** `build_index(settings, *, rebuild=False)` leaves the collection with exactly the chunks of the current corpus. It embeds and upserts only the produced chunks whose id the collection does not hold yet (a stored id already holds that very chunk), and once that has succeeded it deletes every stored id the run did not produce (the set difference). Both steps send batches of 256 chunks. This handles added, edited, shortened, re-chunked and removed files; a run that fails never removes chunks, an unchanged corpus embeds nothing and does not even load the embedding model, so `agentic-rag ingest` is idempotent and cheap to repeat. A corpus without documents raises `FileNotFoundError` instead of emptying the index. `IndexStats.chunks` is the number of chunks the run produced, which is also the size of the collection afterwards.
+- **Rebuild.** `agentic-rag ingest --rebuild` deletes the collection first. It is needed only after changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`: the collection records both, and a plain run or `load_index` with another provider, or another model of the `huggingface` provider, raises `EmbeddingMismatchError` (a `ConfigurationError`) before any model is loaded.
+- **Opening the index.** `load_index(settings)` opens the existing collection without creating it (`IndexNotFoundError` when it or `CHROMA_DIR` is missing). The collection uses cosine distance, so `similarity_search_with_relevance_scores` returns `1 - distance`, higher for more relevant chunks. Apart from the embedding model nothing is loaded up front; the RAG subgraph calls it once per compiled graph, on its first query.
 
 ## Tools
 
@@ -240,6 +254,7 @@ One retrieved chunk, as the UI shows it and the answers cite it: the record is a
 | `title` | `str` or `None` | `None` | Document title, when known |
 | `page` | `int` (≥ 1) or `None` | `None` | 1-based page number, for paged formats such as PDF |
 | `section` | `str` or `None` | `None` | Heading of the section the chunk belongs to, when known |
+| `url` | `str` or `None` | `None` | Public URL of the document, for a downloaded source; the UI links it |
 | `score` | `float` or `None` | `None` | Relevance score; higher means more relevant |
 
 The ingestion metadata (`DocumentMetadata` and `ChunkMetadata` in `agentic_rag.ingestion`) fills every field except `content` and `score`.
@@ -333,7 +348,7 @@ Cheap builds: creating `ChatOllama` makes no connection, and no model is loaded 
 | Exception | Base | Raised by | Meaning |
 |---|---|---|---|
 | `PlannedFeatureError` | `NotImplementedError` | Every stub, through `planned(qualified_name, phase)` | A part that a later phase implements. Message: `<qualified name> is planned for Phase <N> (see docs/project-structure-plan.md, section 8)` |
-| `ConfigurationError` | `ValueError` | `get_settings()` | The settings could not be loaded: a `.env` that cannot be read or is not UTF-8 (Windows PowerShell 5.1 writes UTF-16 with `>` and `Out-File`; use `Copy-Item` or `Set-Content -Encoding utf8`) |
+| `ConfigurationError` | `ValueError` | `get_settings()`, `ingestion.sources.load_sources`, and as `EmbeddingMismatchError` `ingestion.index` | The configuration cannot be used: a `.env` that cannot be read or is not UTF-8 (Windows PowerShell 5.1 writes UTF-16 with `>` and `Out-File`; use `Copy-Item` or `Set-Content -Encoding utf8`), an invalid `data/sources.toml`, or an index built with other embeddings than the settings name |
 | `InvalidArgumentError` | `ValueError` | Library functions that check user input, such as `run_evaluation` for a node outside `NODE_TARGETS` | An argument that came from the user was rejected |
 
 Invalid setting values raise `pydantic.ValidationError` instead; `config.describe_invalid_settings(error)` names them as `(variable, problem)` pairs. Only `PlannedFeatureError` counts as a planned gap: any other `NotImplementedError`, for example from a library, is a real failure and keeps its traceback.
@@ -343,7 +358,7 @@ CLI exit codes (`agentic_rag.cli`):
 | Code | When | Output |
 |---|---|---|
 | 0 | Success | The command's output |
-| 1 | The command failed | A `PlannedFeatureError` prints only its message. Any other exception propagates with its traceback, a plain `NotImplementedError` and a `ValidationError` raised inside a command included |
+| 1 | The command failed | A `PlannedFeatureError` prints only its message, and so do a missing corpus (`FileNotFoundError`) and a `DownloadError` of `ingest`. Any other exception propagates with its traceback, a plain `NotImplementedError` and a `ValidationError` raised inside a command included |
 | 2 | Usage or configuration error | No traceback: an argparse error, an `InvalidArgumentError` from the command (reported like a usage error of the subcommand, for example `eval --target node --node verify_answer`), invalid settings (named by variable) or a `ConfigurationError` |
 | 130 | Interrupted | `Interrupted.` |
 
@@ -375,9 +390,9 @@ The Streamlit UI:
 | `LLM_TEMPERATURE` | 0.0–2.0 | `0.0` | Sampling temperature; 0.0 keeps the answers as deterministic as the model allows | `llm` |
 | `EMBEDDING_PROVIDER` | `huggingface`, `fake` | `huggingface` | Embedding backend | `embeddings.get_embeddings` |
 | `EMBEDDING_MODEL` | Hugging Face model id | `intfloat/multilingual-e5-small` | Embedding model (provisional, decision 5); ignored by `fake`; the E5 `query:` and `passage:` prefixes are added automatically (instruct E5 models are not supported) | `embeddings` |
-| `DATA_DIR` | Path | `data/raw` | Corpus directory | `ingestion` (Phase 2) |
-| `CHROMA_DIR` | Path | `data/chroma_db` | Directory of the persistent Chroma index | `ingestion.index` (Phase 2) |
-| `CHROMA_COLLECTION` | 3–63 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `-`; a letter or digit at both ends; no `..`; not an IPv4 address | `documents` | Chroma collection name. The 63-character limit is the project's own, deliberately stricter than chromadb 1.5.9 (3–512), to keep names portable; the IPv4 rule is a real parse, so `10.0.0.1` is rejected and `999.999.999.999` accepted, as in chromadb. A test checks the boundary names against the installed chromadb | `ingestion.index` (Phase 2) |
+| `DATA_DIR` | Path | `data/raw` | Corpus directory: one directory per downloaded source | `ingestion` |
+| `CHROMA_DIR` | Path | `data/chroma_db` | Directory of the persistent Chroma index | `ingestion.index` |
+| `CHROMA_COLLECTION` | 3–63 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `-`; a letter or digit at both ends; no `..`; not an IPv4 address | `documents` | Chroma collection name. The 63-character limit is the project's own, deliberately stricter than chromadb 1.5.9 (3–512), to keep names portable; the IPv4 rule is a real parse, so `10.0.0.1` is rejected and `999.999.999.999` accepted, as in chromadb. A test checks the boundary names against the installed chromadb | `ingestion.index` |
 | `TOP_K` | Integer ≥ 1 | `4` | Chunks retrieved per query; also the k of hit@k | `rag` (Phase 3), `evaluation` (Phase 7) |
 | `MAX_RETRIES` | Integer ≥ 0 | `2` | Bound on the verify → re-plan loop; 0 disables re-planning | `agent` (Phase 4) |
 | `INGEST_ON_START` | `true`, `false` | `true` | Build the index at start-up when it is missing | Nothing yet: the container entrypoint (Phase 6) |
@@ -406,7 +421,7 @@ In the Compose stack, the `app` service receives `LLM_PROVIDER`, `EMBEDDING_PROV
 | Embeddings | `get_embeddings`, `HashingEmbeddings`, the E5 prefix detection | None |
 | Step traces | `TraceEvent`, `traced`, `trace_events_from_chunk`, `epoch_now` | None |
 | State contracts | `AgentState`, `RagState`, their records and the literal types in `agent.types` | None |
-| Ingestion | `DocumentMetadata`, `ChunkMetadata`, `ChunkingConfig`, `IndexStats`, `IndexNotFoundError`, `EmbeddingMismatchError` | Loading, splitting, `build_index`, `load_index` (Phase 2) |
+| Ingestion | The source list and the download (`sources`, `download`), the Markdown cleaning (`markdown`), the loaders, the chunking, `build_index` and `load_index`, with their data contracts | None |
 | RAG subgraph | `RAG_NODE_NAMES`, the node signatures with their dependencies | The four nodes and `build_rag_graph` (Phase 3) |
 | Main workflow | `NODE_NAMES`, the node signatures, the routing types, the interface of the search tool | The seven nodes, the three routing functions, the tools and `build_agent_graph` (Phase 4) |
 | UI | The chat page with stop handling, the step panel, the retrieved-context panel, the settings summary | Answers, which need the main graph (Phase 4); the check against the real graph (Phase 5) |

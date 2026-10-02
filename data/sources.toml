@@ -1,0 +1,131 @@
+# Corpus sources: the official documentation the chatbot answers from (plan decision 8).
+#
+# `agentic-rag ingest --download` fetches every source at its pinned commit into
+# DATA_DIR/<id>/ (data/raw/<id>/ by default) and then builds the index. The format is
+# described in src/agentic_rag/ingestion/sources.py; in short:
+#
+#   id          directory under DATA_DIR, also the first segment of every cited path
+#   name        short name added to every page title ("useState – React")
+#   repository  git repository; commit: the pinned commit (40 hex digits)
+#   license     SPDX identifier of the documentation's license
+#   root        directory inside the repository that the patterns are relative to
+#   include     glob patterns of the files to copy (* = one segment, **/ = any directories)
+#   exclude     glob patterns of files to leave out
+#   url         template of a page's public URL: {path} (the file path without its
+#               extension and a final "index") or a front-matter key such as {slug}
+#   strip_order_prefixes  drop ordering prefixes such as "01-" or "3." from {path}
+#
+# The selection is deliberately small: the current guides and API references, without
+# legacy, migration, blog or contributor pages. To update a source, change its commit and
+# run `agentic-rag ingest --download` again; to add one, add a table. Pinned on 2026-10-02.
+
+[[sources]]
+id = "mdn"
+name = "MDN"
+repository = "https://github.com/mdn/content"
+commit = "1b3149a690cab7de2dfdfd24c273339a606982b0"
+# Prose CC BY-SA 2.5; code samples added on or after 2010-08-20 are CC0.
+license = "CC-BY-SA-2.5"
+root = "files/en-us"
+include = [
+    "web/css/guides/cascade/**/index.md",
+    "web/css/guides/selectors/**/index.md",
+    "web/css/guides/flexible_box_layout/**/index.md",
+    "web/css/guides/grid_layout/**/index.md",
+    "web/css/guides/box_model/**/index.md",
+    "web/css/guides/positioned_layout/**/index.md",
+    "web/css/guides/media_queries/**/index.md",
+    "web/css/guides/containment/**/index.md",
+    "web/css/guides/cascading_variables/**/index.md",
+    "web/css/guides/nesting/**/index.md",
+    "web/css/guides/colors/**/index.md",
+    "web/css/reference/selectors/**/index.md",
+    "web/html/guides/**/index.md",
+    "web/html/reference/elements/**/index.md",
+    "web/accessibility/**/index.md",
+    "web/javascript/guide/**/index.md",
+    "web/api/fetch_api/**/index.md",
+]
+# Vendor-prefixed selectors (::-moz-*, ::-webkit-*) are non-standard.
+exclude = ["web/css/reference/selectors/*-moz-*/**", "web/css/reference/selectors/*-webkit-*/**"]
+url = "https://developer.mozilla.org/en-US/docs/{slug}"
+
+[[sources]]
+id = "react"
+name = "React"
+repository = "https://github.com/reactjs/react.dev"
+commit = "8c68ae8d2410abe59f351195780c6f8ea9f50904"
+license = "CC-BY-4.0"
+root = "src/content"
+include = [
+    "learn/**/*.md",
+    "reference/react/**/*.md",
+    "reference/react-dom/**/*.md",
+    "reference/rsc/**/*.md",
+    "reference/rules/**/*.md",
+]
+url = "https://react.dev/{path}"
+
+[[sources]]
+id = "vue"
+name = "Vue"
+repository = "https://github.com/vuejs/docs"
+commit = "40aa88af0094f7bab4aaf786e55c748a6a251d88"
+license = "CC-BY-4.0"
+root = "src"
+include = ["guide/**/*.md", "api/**/*.md"]
+# The API index page is rendered by a Vue component and has no text of its own.
+exclude = ["api/index.md"]
+url = "https://vuejs.org/{path}.html"
+
+[[sources]]
+id = "nextjs"
+name = "Next.js"
+repository = "https://github.com/vercel/next.js"
+commit = "922d2e7335a05eba67f7aeec2049aa87cdeb4a9d"
+license = "MIT"
+# The App Router only; the Pages Router (docs/02-pages) is the legacy router.
+root = "docs/01-app"
+include = [
+    "01-getting-started/*.mdx",
+    "02-guides/*.mdx",
+    "03-api-reference/01-directives/**/*.mdx",
+    "03-api-reference/02-components/**/*.mdx",
+    "03-api-reference/03-file-conventions/**/*.mdx",
+    "03-api-reference/04-functions/**/*.mdx",
+    "04-glossary.mdx",
+]
+# Index pages only list their child pages.
+exclude = ["**/index.mdx"]
+url = "https://nextjs.org/docs/app/{path}"
+strip_order_prefixes = true
+
+[[sources]]
+id = "nuxt"
+name = "Nuxt"
+repository = "https://github.com/nuxt/nuxt"
+commit = "3fde4d625cc353e83ac10f6b75db8ca480167be4"
+license = "MIT"
+# Without the module-author Kit API, Nuxt Bridge, the migration guides and the error pages.
+root = "docs"
+include = [
+    "1.getting-started/**/*.md",
+    "2.directory-structure/**/*.md",
+    "3.guide/**/*.md",
+    "4.api/1.components/**/*.md",
+    "4.api/2.composables/**/*.md",
+    "4.api/3.utils/**/*.md",
+]
+exclude = ["3.guide/3.ai/**"]
+url = "https://nuxt.com/docs/{path}"
+strip_order_prefixes = true
+
+[[sources]]
+id = "typescript"
+name = "TypeScript"
+repository = "https://github.com/microsoft/TypeScript-Website"
+commit = "6556b08756b766fd41d0f887174cb0b042e5f72c"
+license = "CC-BY-4.0"
+root = "packages/documentation/copy/en"
+include = ["handbook-v2/**/*.md", "reference/Utility Types.md"]
+url = "https://www.typescriptlang.org{permalink}"

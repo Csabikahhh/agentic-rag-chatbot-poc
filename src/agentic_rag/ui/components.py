@@ -719,7 +719,14 @@ def _source_details(source: Source) -> str:
         details.append(f"Section: {escape_markdown(source.section)}")
     if source.page is not None:
         details.append(f"Page: {source.page}")
+    if source.url:
+        details.append(f"[Open the page]({_link_target(source.url)})")
     if source.score is not None:
         details.append(f"Score: {source.score:.3f}")
     details.append(f"Chunk: {_inline_code(source.chunk_id)}")
     return " · ".join(details)
+
+
+def _link_target(url: str) -> str:
+    """Encode the characters that would end a Markdown link target early."""
+    return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")

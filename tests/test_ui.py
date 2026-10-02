@@ -873,6 +873,27 @@ def test_render_sources_shows_every_chunk_collapsed_with_its_details() -> None:
     assert second.text[0].value == "Second *chunk*, verbatim."
 
 
+def test_render_sources_links_the_page_of_a_downloaded_source() -> None:
+    source = Source(
+        chunk_id="c1",
+        source="mdn/web/css/reference/selectors/_colon_has/index.md",
+        content=":has() CSS pseudo-class – MDN\n\nThe functional :has() pseudo-class ...",
+        title=":has() CSS pseudo-class – MDN",
+        url="https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has",
+    )
+
+    at = run_script(sources_panel_script, [source])
+
+    assert not at.exception
+    (expander,) = at.expander
+    assert expander.caption[0].value == (
+        "Source: `mdn/web/css/reference/selectors/_colon_has/index.md` · "
+        "Title: :has() CSS pseudo-class – MDN · "
+        "[Open the page](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has)"
+        " · Chunk: `c1`"
+    )
+
+
 def test_render_reply_escapes_the_dollar_signs_of_the_answer_outside_code() -> None:
     answer = "The fee is $25 and the late fee is $40; `echo $HOME` stays as it is."
 

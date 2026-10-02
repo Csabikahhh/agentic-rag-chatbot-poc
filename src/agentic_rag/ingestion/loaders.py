@@ -1,34 +1,59 @@
 """Document loaders: the corpus files in ``DATA_DIR`` become LangChain ``Document`` objects.
 
-First step of the ingestion pipeline (plan section 5.4), planned for Phase 2. The corpus is
-official frontend documentation (plan decision 8), so the file formats are Markdown and MDX
-(plan section 12.6).
+First step of the ingestion pipeline (plan section 5.4). The corpus is official frontend
+documentation (plan decision 8), so the formats are Markdown and MDX (plan section 12.6):
+``.md``, ``.mdx`` and ``.markdown`` files are parsed by :mod:`agentic_rag.ingestion.markdown`;
+``.txt`` files are read as one section of plain text. Any other file stops the ingestion.
 
 Which files belong to the corpus (:func:`list_corpus_files`):
 
 - every regular file under ``settings.data_dir``, recursively, in a stable order (sorted by
   the path relative to ``data_dir``), so that two runs build the same index;
-- except dotfiles and everything inside dot-directories (``.gitkeep``, ``.DS_Store``,
+- except dotfiles and everything inside dot-directories (``.gitkeep``, ``.source.json``,
   ``.ipynb_checkpoints/``) and README files (``README``, ``README.md``, ``README.hu.md``, in
   any letter case). README files describe the corpus, for example its sources and licenses,
   and are not part of it.
 
-Every loaded ``Document`` carries the extracted text as ``page_content`` and
-:class:`DocumentMetadata`. The chunks inherit the metadata, and the UI and the answers cite it
-through ``agentic_rag.rag.state.Source``.
+A file gives one ``Document`` per section with text (see ``markdown.parse_markdown``). Every
+document carries the cleaned section text as ``page_content`` and :class:`DocumentMetadata`.
+When the file lies in a downloaded source directory (``DATA_DIR/<id>/`` with a
+``.source.json`` manifest), the source's name is added to the title (``useState – React``) and
+the page's public URL is set. The chunks inherit the metadata, and the UI and the answers cite
+it through ``agentic_rag.rag.state.Source``.
 
 The loaders only read: in the container ``data_dir`` is mounted read-only.
 """
 
+import logging
+import os
 from pathlib import Path
-from typing import Required, TypedDict
+from typing import Final, Required, TypedDict
 
 from langchain_core.documents import Document
 
 from agentic_rag.config import Settings
-from agentic_rag.errors import planned
+from agentic_rag.ingestion.markdown import Section, parse_markdown
+from agentic_rag.ingestion.sources import SourceManifest, read_manifest
 
-__all__ = ["DocumentMetadata", "list_corpus_files", "load_documents", "load_file"]
+__all__ = [
+    "SECTION_SEPARATOR",
+    "SUPPORTED_SUFFIXES",
+    "DocumentMetadata",
+    "list_corpus_files",
+    "load_documents",
+    "load_file",
+]
+
+logger = logging.getLogger(__name__)
+
+SUPPORTED_SUFFIXES: Final = frozenset({".md", ".mdx", ".markdown", ".txt"})
+"""File extensions the loaders read, in any letter case."""
+
+SECTION_SEPARATOR: Final = " > "
+"""Separator of the headings in ``DocumentMetadata.section``: ``Usage > Adding state``."""
+
+_README_NAMES: Final = frozenset({"readme", "readme.md", "readme.hu.md"})
+_MARKDOWN_SUFFIXES: Final = frozenset({".md", ".mdx", ".markdown"})
 
 
 class DocumentMetadata(TypedDict, total=False):
@@ -40,17 +65,22 @@ class DocumentMetadata(TypedDict, total=False):
 
     Attributes:
         source: Path of the file relative to ``data_dir`` with forward slashes, for example
-            ``guides/setup.pdf``; the same on every machine and in the container.
-        title: Title of the document, for example the PDF title, the first Markdown heading
-            or the file name.
-        page: 1-based page number in paged formats (PDF): PyPDF's 0-based page index plus 1.
-        section: Heading of the section the text belongs to, in formats with headings.
+            ``react/reference/react/useState.md``; the same on every machine and in the
+            container. Its first segment is the source id of a downloaded source.
+        title: Title of the page (front matter, first H1 or file name), followed by the
+            source's name for a downloaded source: ``useState – React``.
+        page: 1-based page number in paged formats. No supported format has pages, so the
+            loaders never set it; the key stays for corpora with PDF files.
+        section: The headings of the section, joined with :data:`SECTION_SEPARATOR`; absent
+            for the introduction of a page.
+        url: Public URL of the page, for a downloaded source with a URL template.
     """
 
     source: Required[str]
     title: str
     page: int
     section: str
+    url: str
 
 
 def list_corpus_files(data_dir: Path) -> list[Path]:
@@ -67,18 +97,27 @@ def list_corpus_files(data_dir: Path) -> list[Path]:
 
     Raises:
         FileNotFoundError: If ``data_dir`` does not exist or is not a directory.
-        PlannedFeatureError: Until Phase 2 implements the function.
     """
-    raise planned(f"{__name__}.list_corpus_files", 2)
+    if not data_dir.is_dir():
+        msg = f"Corpus directory not found: {data_dir} (run 'agentic-rag ingest --download')"
+        raise FileNotFoundError(msg)
+    files: list[Path] = []
+    for directory, subdirectories, names in os.walk(data_dir):
+        subdirectories[:] = [name for name in subdirectories if not name.startswith(".")]
+        for name in names:
+            path = Path(directory) / name
+            if name.startswith(".") or name.casefold() in _README_NAMES or not path.is_file():
+                continue
+            files.append(path)
+    return sorted(files, key=lambda path: path.relative_to(data_dir).as_posix())
 
 
 def load_file(path: Path, *, data_dir: Path) -> list[Document]:
     """Load one corpus file into documents with :class:`DocumentMetadata`.
 
-    Paged formats (PDF) give one document per page with ``page`` set; other formats give one
-    document per file, or one per section with ``section`` set where the format has
-    headings. The text is cleaned for retrieval (for example whitespace and hyphenation
-    artefacts of PDF extraction); Phase 2 decides the details per format.
+    Markdown and MDX files give one document per section with text (``section`` set for every
+    section but the introduction); a text file gives one document. The text is cleaned for
+    retrieval by ``markdown.parse_markdown``.
 
     Args:
         path: A file returned by :func:`list_corpus_files`.
@@ -88,11 +127,11 @@ def load_file(path: Path, *, data_dir: Path) -> list[Document]:
         The documents of the file in reading order; empty when the file has no text.
 
     Raises:
-        ValueError: If the file format is not supported. The corpus is curated, so an
-            unexpected file stops the ingestion instead of being skipped silently.
-        PlannedFeatureError: Until Phase 2 implements the function.
+        ValueError: If the file format is not supported, or the manifest of its source
+            directory is invalid. The corpus is curated, so an unexpected file stops the
+            ingestion instead of being skipped silently.
     """
-    raise planned(f"{__name__}.load_file", 2)
+    return _load_file(path, data_dir=data_dir, manifests={})
 
 
 def load_documents(settings: Settings) -> list[Document]:
@@ -110,6 +149,62 @@ def load_documents(settings: Settings) -> list[Document]:
     Raises:
         FileNotFoundError: If ``settings.data_dir`` does not exist.
         ValueError: If a file has an unsupported format.
-        PlannedFeatureError: Until Phase 2 implements the function.
     """
-    raise planned(f"{__name__}.load_documents", 2)
+    files = list_corpus_files(settings.data_dir)
+    manifests: dict[str, SourceManifest | None] = {}
+    documents: list[Document] = []
+    for path in files:
+        documents += _load_file(path, data_dir=settings.data_dir, manifests=manifests)
+    logger.info(
+        "Loaded %d documents from %d files in %s", len(documents), len(files), settings.data_dir
+    )
+    return documents
+
+
+def _load_file(
+    path: Path, *, data_dir: Path, manifests: dict[str, SourceManifest | None]
+) -> list[Document]:
+    """Load one file; ``manifests`` caches the manifest of each source directory."""
+    source = path.relative_to(data_dir).as_posix()
+    suffix = path.suffix.lower()
+    if suffix not in SUPPORTED_SUFFIXES:
+        supported = ", ".join(sorted(SUPPORTED_SUFFIXES))
+        msg = f"Unsupported corpus file {source}: expected one of {supported}"
+        raise ValueError(msg)
+    text = path.read_text(encoding="utf-8-sig")
+
+    front_matter: dict[str, str] = {}
+    if suffix in _MARKDOWN_SUFFIXES:
+        page = parse_markdown(text)
+        title = page.title or path.stem
+        sections = page.sections
+        front_matter = page.front_matter
+    else:
+        title = path.stem
+        sections = (Section(path=(), text=text.strip()),) if text.strip() else ()
+
+    url: str | None = None
+    source_id, _, path_in_source = source.partition("/")
+    manifest = _manifest(data_dir, source_id, manifests) if path_in_source else None
+    if manifest is not None:
+        title = f"{title} – {manifest.name}"
+        url = manifest.page_url(path_in_source, front_matter)
+
+    documents = []
+    for section in sections:
+        metadata: DocumentMetadata = {"source": source, "title": title}
+        if section.path:
+            metadata["section"] = SECTION_SEPARATOR.join(section.path)
+        if url is not None:
+            metadata["url"] = url
+        documents.append(Document(page_content=section.text, metadata=dict(metadata)))
+    return documents
+
+
+def _manifest(
+    data_dir: Path, source_id: str, manifests: dict[str, SourceManifest | None]
+) -> SourceManifest | None:
+    """Return the manifest of ``data_dir/<source_id>/``, read once per directory."""
+    if source_id not in manifests:
+        manifests[source_id] = read_manifest(data_dir / source_id)
+    return manifests[source_id]

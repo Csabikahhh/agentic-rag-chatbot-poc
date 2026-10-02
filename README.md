@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The agent, the RAG subgraph, the ingestion pipeline and the evaluation and load-test runners are typed skeletons that report the phase they are planned for. The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Next: Phase 2 (corpus download, ingestion and index). Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phase 2 is done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index. The agent, the RAG subgraph and the evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 3 (the RAG subgraph). Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -39,7 +39,7 @@ Status of each requirement from the brief:
 **Problem & data**
 
 - [x] Real-world problem (domain / use case) with a written justification
-- [ ] Freely chosen text data source, with the focus on quality processing and scalable data integration rather than volume
+- [x] Freely chosen text data source, with the focus on quality processing and scalable data integration rather than volume
 
 **Agentic architecture (LangGraph)**
 
@@ -112,11 +112,11 @@ The detailed target design (the seven main nodes and their routing, the four ste
 
 ## Design decisions
 
-Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. Decisions 8–9, the domain and the non-retrieval tools, were made on 2026-10-02 and are built in Phases 2 and 4. The LLM and the embedding model (decisions 4 and 5) are provisional defaults until the evaluation and the load test have measured them, and the chunking is tuned in Phase 2.
+Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3-decisions-to-lock-in-before-scaffolding) are built into the code. Decisions 8–9, the domain and the non-retrieval tools, were made on 2026-10-02: the corpus and its ingestion are built (Phase 2), the tools follow in Phase 4. The LLM and the embedding model (decisions 4 and 5) and the chunking parameters are provisional until the evaluation and the load test have measured them.
 
 | Area | Key trade-offs | Choice & rationale |
 |---|---|---|
-| Domain & data source | Relevance, availability and licensing, preprocessing effort | **Frontend developer assistant** over the official documentation (Phase 2): MDN Web Docs (a curated subset on CSS, HTML, accessibility and JavaScript; prose CC BY-SA 2.5, code samples CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) and the TypeScript Handbook (CC BY 4.0). `agentic-rag ingest --download` fetches them from pinned commits, as listed in `data/sources.yaml`: every run indexes the same versions, and no share-alike text enters the repository. The documentation is versioned, structured and covers the questions developers actually ask. The operations extension (Kubernetes, CC BY 4.0; Docker, Apache 2.0) is two more entries in the same list |
+| Domain & data source | Relevance, availability and licensing, preprocessing effort | **Frontend developer assistant** over the official documentation (Phase 2): MDN Web Docs (a curated subset on CSS, HTML, accessibility and JavaScript; prose CC BY-SA 2.5, code samples CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) and the TypeScript Handbook (CC BY 4.0). `agentic-rag ingest --download` fetches them from pinned commits, as listed in `data/sources.toml`: every run indexes the same versions, and no share-alike text enters the repository. The documentation is versioned, structured and covers the questions developers actually ask. The operations extension (Kubernetes, CC BY 4.0; Docker, Apache 2.0) is two more entries in the same list |
 | Non-retrieval tools | Fit to the domain; deterministic, local and testable | **Three tools** (Phase 4): *browser support* looks a feature up in MDN's `browser-compat-data` (CC0, a pinned release) and compares its versions with the target browsers; *colour contrast* computes the WCAG 2.x contrast ratio of two colours and whether it passes AA and AAA for normal and large text; *CSS specificity* computes the specificity of selectors by the Selectors Level 4 rules and tells which one wins. Each is a computation or a lookup in pinned data, so it can be tested exactly, and it gives the model facts it would otherwise guess |
 | Packaging & Python version | Reproducible builds, wheel coverage of the ML stack, setup effort | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` layout: the lock file pins every package for local runs and the image alike, uv installs the pinned Python itself, and 3.12 has the widest wheel coverage for torch and chromadb |
 | LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen2.5:7b-instruct`**, provisional: a multilingual 7B instruct model under the Apache 2.0 license whose 4-bit build (about 4.7 GB) fits in the 8 GB of VRAM of the development machine; confirmed or replaced by the evaluation and the load test |
@@ -124,12 +124,14 @@ Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3
 | Tool-calling style | Reliability with small local models vs. flexibility of native tool calling | **Structured-output planner + explicit tool nodes**: the planner emits typed sub-tasks as JSON, which small local models produce more reliably than native tool calls; the tools stay LangChain tools, so `bind_tools` remains possible |
 | Embedding model | Retrieval quality vs. speed; language coverage | **`intfloat/multilingual-e5-small`**, provisional, run locally with sentence-transformers: multilingual (Hungarian included) and small (384 dimensions), so it runs on the CPU and leaves the GPU to the LLM |
 | Vector store | Persistence, metadata filtering, scalability | **Chroma** with a persistent client in `data/chroma_db/` (a named volume in Compose): persistence and metadata filtering without pickle deserialization |
-| Chunking | Chunk size and overlap vs. retrieval precision and context length | *Planned for Phase 2:* split the Markdown at its H2 and H3 headings, keep the heading path as the `section` metadata and every code block whole, and split only the sections that are too long, with the code's 900-character chunks and 150-character overlap; tuned against the evaluation set |
+| Chunking | Chunk size and overlap vs. retrieval precision and context length | **Structure-aware:** the loaders split every page at its H2 and H3 headings, and the heading path becomes the `section` metadata. Each section is packed into chunks of up to 900 characters at paragraph boundaries; a code block stays whole up to 1 800 characters, a heading never ends a chunk, and short trailing paragraphs (up to 150 characters) are repeated in the next chunk. Every chunk starts with a context line of title and headings (`useState – React > Reference > useState(initialState)`), so a chunk such as *Parameters* still names its subject for the embedding model and the prompt. Result: 18 654 chunks from 1 160 pages, median 602 characters. The sizes are provisional until the evaluation (Phase 7) |
 
 Notes on the provisional defaults:
 
 - **Models.** Both models are defaults, not final choices (plan decisions 4 and 5): they are confirmed or replaced once the evaluation and the load test have measured them. The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus: the cross-lingual retrieval of the multilingual E5 model and the Hungarian answers of the 7B model.
-- **Corpus scope.** The framework documentation mixes versions and legacy sections. Phase 2 keeps the current guides and API references, such as the App Router of Next.js, and leaves out the Pages Router, Nuxt Bridge and the migration guides. Every source is stored in a directory of its own under `data/raw/` (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), so every citation shows which documentation it comes from, and APIs of the same name stay apart.
+- **Corpus scope.** The framework documentation mixes versions and legacy sections. The source list keeps the current guides and API references, such as the App Router of Next.js, and leaves out the Pages Router, Nuxt Bridge, the migration guides and MDN's vendor-prefixed selectors: 1 160 pages (MDN 573, Nuxt 172, Next.js 165, React 151, Vue 80, TypeScript 19). Every source is stored in a directory of its own under `data/raw/` (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), and its name is added to every page title (`useState – React`, `useState – Nuxt`), so every citation shows which documentation it comes from, and APIs of the same name stay apart.
+- **Cleaning.** Each documentation set writes Markdown in its own dialect. The loaders turn MDN's macros, the JSX components of React and Next.js, Vue's VitePress containers and Nuxt's MDC components into plain Markdown, drop the Pages Router blocks of the Next.js pages, replace links by their text, and keep every code block verbatim (details in `src/agentic_rag/ingestion/markdown.py`).
+- **Cross-lingual retrieval.** A first check on the built index confirms the risk of a Hungarian question over an English corpus. English questions find the right page: *Which CSS pseudo-class selects a parent element that contains a specific child?* returns MDN's `:has()` first, and *How do I add state to a React component?* returns the state sections of `Component` and `useState`. The Hungarian question *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* ("How do I fetch data on the server in the Next.js App Router?") does not reach the *Fetching Data* page in the top three. The `rewrite_query` step of the RAG subgraph (Phase 3) therefore turns every question into an English search query before retrieval, and the evaluation set measures the effect.
 - **Embeddings.** The no-paid-API rule rules out hosted embedding APIs, so the embeddings run locally. The default model is downloaded once (about 0.5 GB, into the Hugging Face cache, `HF_HOME`) and then works offline; it takes a few seconds to load, its E5 `query:` / `passage:` prefixes are added automatically, and it brings CPU-only torch into the image (about 0.8 GB of the 2.9 GB image). `EMBEDDING_PROVIDER=fake` replaces it with deterministic, hashed bag-of-words vectors: offline and instant, but purely lexical, so only for tests and model-free demos.
 - **Rebuilding the index.** Vectors of different models are not comparable: after changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`, rebuild the index with `agentic-rag ingest --rebuild`.
 
@@ -167,10 +169,12 @@ Notes on the provisional defaults:
 
 ### What works today
 
-The foundation runs end to end, but it does not answer questions yet:
+The foundation and the knowledge base run end to end, but the chatbot does not answer questions yet:
 
 - the tests pass offline, with the fake LLM and the fake embeddings;
-- the CLI lists its commands and `config` prints the effective settings; `ingest`, `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
+- the CLI lists its commands and `config` prints the effective settings;
+- `ingest --download` downloads the corpus and builds the vector index, and a plain `ingest` keeps the index in step with the corpus. Measured on the development machine (24-core CPU): the download takes about 25 s, the first build about 6 minutes (embedding the 18 654 chunks with the default model on the CPU), and a repeated `ingest` 8 s, because unchanged chunks are not embedded again. A query against the index takes about 10 ms after the model has loaded (about 11 s);
+- `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
 - the Streamlit UI starts, shows the configuration and answers every question with a notice that the agent is planned for Phase 4. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - the image builds, and the `app` service starts healthy in fake mode.
 
@@ -197,8 +201,11 @@ uv run ruff check .                              # lint
 uv run ruff format --check .                     # formatting
 uv run python -m agentic_rag --help              # the commands (or: uv run agentic-rag --help)
 uv run python -m agentic_rag config              # the effective settings
+uv run agentic-rag ingest --download             # download the corpus and build the vector index
 uv run streamlit run src/agentic_rag/ui/app.py   # the UI on http://localhost:8501
 ```
+
+**The knowledge base.** `ingest --download` needs git and network access. It fetches each source of [`data/sources.toml`](data/sources.toml) at its pinned commit into `data/raw/<id>/` (gitignored), skipping sources that are already up to date, and then builds the index in `data/chroma_db/`. Without `--download`, `ingest` only updates the index from the corpus that is in place: it embeds new and changed chunks and removes the chunks of deleted pages. After changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`, rebuild it with `ingest --rebuild`. To change the corpus, edit `data/sources.toml` (a new commit, other patterns or a new source) and run `ingest --download` again.
 
 **Fake mode** runs without Ollama and without model downloads: the scripted fake LLM (`LLM_PROVIDER=fake`) and the offline hashing embeddings (`EMBEDDING_PROVIDER=fake`). Set the two variables in the shell, or put them in `.env` (see [Configuration](#configuration)):
 
@@ -212,7 +219,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `552 passed, 1 deselected` (measured on 2026-10-01; the number of passed tests grows with the phases). `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `628 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -235,13 +242,19 @@ The brief asks for a `docker-compose.yml`; the repository provides it as `compos
 
 The corpus, `./data/raw`, is mounted read-only. The named volumes `ollama-data` (Ollama models), `chroma-data` (vector index) and `hf-cache` (Hugging Face models) keep the downloads and the index across rebuilds.
 
+**The knowledge base in the container.** The container cannot write the corpus, so download it on the host first (`uv run agentic-rag ingest --download`, which also builds a host index). The container keeps its own index in the `chroma-data` volume; until the Phase 6 entrypoint builds it at start-up (`INGEST_ON_START`), build it once with:
+
+```bash
+docker compose run --rm --no-deps app agentic-rag ingest
+```
+
 **Full stack:**
 
 ```bash
 docker compose up --build
 ```
 
-The first start builds the image (a few minutes) and downloads the Ollama image and the chat model (several GB); the UI starts once the model pull has finished. The embedding model is downloaded into `hf-cache` the first time it is used (from Phase 2 on). Later starts reuse the volumes.
+The first start builds the image (a few minutes) and downloads the Ollama image and the chat model (several GB); the UI starts once the model pull has finished. The embedding model is downloaded into `hf-cache` the first time it is used, for example by `ingest`. Later starts reuse the volumes.
 
 **Fake mode** (only the `app` service; no Ollama, no model downloads):
 
@@ -307,7 +320,7 @@ docker compose down -v   # also delete the volumes
 
 More options, such as publishing the Ollama API on the host through a local `compose.override.yaml`, are described in the header of [`compose.yaml`](compose.yaml).
 
-> Verified so far: the image build (also with `APP_UID`/`APP_GID` set, and the `--locked` failure on a stale lock file), the layer reuse after a change to `src/`, both Compose configurations, the `app` service in fake mode (healthy, the UI served on port 8501), the `docker run --mount` command from Git Bash, and a simulated Linux bind mount owned by UID 1000. Not run yet: the full stack with the Ollama services (model pull, GPU passthrough), a native Linux host and macOS.
+> Verified so far: the image build (also with `APP_UID`/`APP_GID` set, and the `--locked` failure on a stale lock file), the layer reuse after a change to `src/`, both Compose configurations, the `app` service in fake mode (healthy, the UI served on port 8501), the `docker run --mount` command from Git Bash, a simulated Linux bind mount owned by UID 1000, and `ingest` in the container (fake embeddings, a temporary index directory): it reads the read-only corpus as the app user and produces the same 18 654 chunks as on Windows. Not run yet: the container `ingest` with the Hugging Face model into the `chroma-data` volume, the full stack with the Ollama services (model pull, GPU passthrough), a native Linux host and macOS. From Git Bash, `docker compose run -e NAME=/path` needs `MSYS_NO_PATHCONV=1`, or Git Bash rewrites the path into a Windows path.
 
 ### Configuration
 
@@ -346,7 +359,7 @@ In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` 
 | Command | Purpose | Available |
 |---|---|---|
 | `config` | Print the effective settings as `KEY=value` lines | Now |
-| `ingest [--rebuild]` | Build the vector index from `DATA_DIR` | Phase 2 |
+| `ingest [--rebuild] [--download] [--sources PATH]` | Build or update the vector index from `DATA_DIR`; with `--download`, first download the corpus sources (needs git) | Now |
 | `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | Mermaid diagrams of the compiled graphs | Phases 3–4 |
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH]` | Functional evaluation | Phase 7 |
 | `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Load test against the compiled graph | Phase 8 |
@@ -354,13 +367,13 @@ In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` 
 Exit codes:
 
 - 0 on success;
-- 1 when the command failed: a feature planned for a later phase (`PlannedFeatureError`) prints only its message, any other error its traceback;
-- 2 for usage and configuration errors: invalid arguments (including an `InvalidArgumentError`, such as `eval --node` outside `NODE_TARGETS`), invalid settings, or a `ConfigurationError` (a `.env` that cannot be read or is not UTF-8);
+- 1 when the command failed: a feature planned for a later phase (`PlannedFeatureError`), a missing corpus and a failed download (`ingest`) print only their message, any other error its traceback;
+- 2 for usage and configuration errors: invalid arguments (including an `InvalidArgumentError`, such as `eval --node` outside `NODE_TARGETS`), invalid settings, or a `ConfigurationError` (a `.env` that cannot be read or is not UTF-8, an invalid `data/sources.toml`, or an index built with other embeddings, `EmbeddingMismatchError`);
 - 130 when interrupted.
 
 The details are in [docs/architecture.md](docs/architecture.md#errors-and-exit-codes).
 
-> 🚧 *To be completed:* data ingestion (Phase 2) and the evaluation and load-test runs (Phases 7–8).
+> 🚧 *To be completed:* the evaluation and load-test runs (Phases 7–8).
 
 ## Repository structure
 
@@ -369,7 +382,8 @@ agentic-rag-chatbot-poc/
 ├── .claude/                        # Claude Code agents and skills used while building the project
 ├── data/
 │   ├── README.md                   # data layout, corpus rules, when to rebuild the index
-│   ├── raw/                        # source corpus (DATA_DIR); only .gitkeep until Phase 2
+│   ├── sources.toml                # the corpus sources: repositories, pinned commits, patterns, licenses
+│   ├── raw/                        # downloaded corpus (DATA_DIR), one directory per source; gitignored
 │   └── eval/
 │       ├── README.md               # evaluation question-set schema and report formats
 │       └── results/                # committed evaluation and load-test reports; only .gitkeep until Phase 7
@@ -399,10 +413,13 @@ agentic-rag-chatbot-poc/
 │       │   ├── state.py            # RagState, RagInput, RagOutput, Source (implemented contracts)
 │       │   ├── nodes.py            # rewrite_query · retrieve · grade_documents · build_context
 │       │   └── graph.py            # RAG_NODE_NAMES and build_rag_graph()
-│       ├── ingestion/              # ingestion pipeline (skeleton until Phase 2)
-│       │   ├── loaders.py          # corpus files → Documents with citation metadata
-│       │   ├── chunking.py         # splitter configuration (starting point: 900/150 characters)
-│       │   └── index.py            # build and open the Chroma index; IndexStats
+│       ├── ingestion/              # ingestion pipeline: download, clean, chunk, embed and store
+│       │   ├── sources.py          # the source list, glob patterns, manifests and page URLs
+│       │   ├── download.py         # sparse git checkout of each source at its pinned commit
+│       │   ├── markdown.py         # front matter, dialect cleaning (MDN, MDX, VitePress, MDC), sections
+│       │   ├── loaders.py          # corpus files → one Document per section, with citation metadata
+│       │   ├── chunking.py         # structure-aware chunks with a context line (900/150, code up to 1800)
+│       │   └── index.py            # build, update and open the Chroma index; IndexStats
 │       ├── evaluation/
 │       │   ├── dataset.py          # EvalItem and the questions.jsonl loader
 │       │   ├── metrics.py          # hit@k and routing accuracy; LLM-judged metrics in Phase 7
@@ -419,10 +436,11 @@ agentic-rag-chatbot-poc/
 │   ├── test_config.py              # defaults, environment and .env handling, validation, logging
 │   ├── test_embeddings.py          # offline fake and Hugging Face branch, without downloads
 │   ├── test_evaluation.py          # dataset loader, metrics and report models
+│   ├── test_ingestion.py           # sources, download (local git repository), cleaning, chunking, index
 │   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`, deselected by default)
 │   ├── test_loadtest.py            # percentiles, latency summaries and the report model
 │   ├── test_skeletons_agent.py     # main workflow skeleton: nodes, routing, tools, graph
-│   ├── test_skeletons_rag.py       # ingestion and RAG subgraph skeletons
+│   ├── test_skeletons_rag.py       # RAG subgraph skeleton; ingestion data contracts
 │   ├── test_state.py               # state contracts and reducers
 │   ├── test_tracing.py             # step-trace primitives
 │   └── test_ui.py                  # Streamlit UI under AppTest

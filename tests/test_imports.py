@@ -102,9 +102,12 @@ GROUPS = (
         modules=(
             "agentic_rag.embeddings",
             "agentic_rag.ingestion",
+            "agentic_rag.ingestion.sources",
+            "agentic_rag.ingestion.markdown",
             "agentic_rag.ingestion.loaders",
             "agentic_rag.ingestion.chunking",
             "agentic_rag.ingestion.index",
+            "agentic_rag.ingestion.download",
             "agentic_rag.rag",
             "agentic_rag.rag.state",
             "agentic_rag.rag.nodes",

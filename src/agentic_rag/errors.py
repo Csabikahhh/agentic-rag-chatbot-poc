@@ -28,7 +28,10 @@ class PlannedFeatureError(NotImplementedError):
 
 
 class ConfigurationError(ValueError):
-    """The settings could not be loaded, for example because ``.env`` is not valid UTF-8.
+    """The configuration cannot be used: the settings could not be loaded (for example
+    because ``.env`` is not valid UTF-8), a configuration file is invalid (``sources.toml``),
+    or the settings do not match the data they open (an index built with another embedding
+    model, ``EmbeddingMismatchError``).
 
     Invalid setting values raise ``pydantic.ValidationError`` instead; entry points handle
     both as a configuration problem (exit code 2 in the CLI).

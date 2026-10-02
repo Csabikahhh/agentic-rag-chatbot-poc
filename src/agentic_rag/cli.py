@@ -1,7 +1,8 @@
 """Command-line interface: ``agentic-rag <command>``, or ``python -m agentic_rag <command>``.
 
 Commands:
-    ingest        Build the vector index from the corpus in DATA_DIR (Phase 2).
+    ingest        Build the vector index from the corpus in DATA_DIR; with --download, first
+                  download the corpus sources of data/sources.toml.
     eval          Run the functional evaluation on the full graph or one node (Phase 7).
     loadtest      Send N queries at a given concurrency and report latencies (Phase 8).
     export-graph  Print or write the Mermaid diagrams of the compiled graphs (Phases 3-4).
@@ -10,7 +11,8 @@ Commands:
 Exit codes:
     0    Success.
     1    The command failed. A feature that is planned for a later phase
-         (``agentic_rag.errors.PlannedFeatureError``) prints only its message. Any other
+         (``agentic_rag.errors.PlannedFeatureError``), a missing corpus and a failed corpus
+         download (``ingest``) print only their message. Any other
          exception propagates with its traceback (Python then exits with 1), including a
          plain ``NotImplementedError`` from a library and a ``ValidationError`` raised inside
          a command: those are bugs, not planned gaps or configuration errors.
@@ -126,12 +128,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ingest = _add_command(
-        commands, "ingest", _run_ingest, "build the vector index from the corpus in DATA_DIR"
+        commands,
+        "ingest",
+        _run_ingest,
+        "build the vector index from the corpus in DATA_DIR",
+        validate=_check_ingest_args,
     )
     ingest.add_argument(
         "--rebuild",
         action="store_true",
         help="discard the existing index and build it from scratch",
+    )
+    ingest.add_argument(
+        "--download",
+        action="store_true",
+        help="first download the corpus sources into DATA_DIR at their pinned commits; "
+        "sources that are up to date are skipped (needs git and network access)",
+    )
+    ingest.add_argument(
+        "--sources",
+        type=Path,
+        metavar="PATH",
+        help="the source list for --download (default: data/sources.toml)",
     )
 
     evaluation = _add_command(
@@ -274,6 +292,19 @@ def _non_negative_int(text: str) -> int:
     return _int_at_least(text, 0)
 
 
+def _check_ingest_args(args: argparse.Namespace) -> str | None:
+    """Check the option combinations of ``ingest`` that argparse cannot express."""
+    if args.sources is not None and not args.download:
+        return "--sources can only be used with --download"
+    if args.download:
+        from agentic_rag.ingestion.sources import DEFAULT_SOURCES_FILE
+
+        sources = args.sources or DEFAULT_SOURCES_FILE
+        if not sources.is_file():
+            return f"--sources: file not found: {sources}"
+    return None
+
+
 def _check_eval_args(args: argparse.Namespace) -> str | None:
     """Check the option combinations of ``eval`` that argparse cannot express."""
     if args.target == "node" and not args.node:
@@ -293,10 +324,28 @@ def _check_export_args(args: argparse.Namespace) -> str | None:
 
 
 def _run_ingest(args: argparse.Namespace, settings: Settings) -> int:
-    """Build the vector index with ``agentic_rag.ingestion.index.build_index``."""
+    """Download the corpus when asked, then build the vector index.
+
+    The download logs its progress; only the index statistics go to standard output.
+    """
+    if args.download:
+        from agentic_rag.ingestion.download import DownloadError, download_sources
+        from agentic_rag.ingestion.sources import DEFAULT_SOURCES_FILE
+
+        try:
+            download_sources(settings, sources_file=args.sources or DEFAULT_SOURCES_FILE)
+        except DownloadError as exc:
+            print(f"{PROG} ingest: {exc}", file=sys.stderr)
+            return 1
+
     from agentic_rag.ingestion.index import build_index
 
-    _print_result(build_index(settings, rebuild=args.rebuild))
+    try:
+        stats = build_index(settings, rebuild=args.rebuild)
+    except FileNotFoundError as exc:  # no corpus yet; the message says how to download it
+        print(f"{PROG} ingest: {exc}", file=sys.stderr)
+        return 1
+    _print_result(stats)
     return 0
 
 

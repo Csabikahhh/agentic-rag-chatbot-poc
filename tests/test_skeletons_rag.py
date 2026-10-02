@@ -1,9 +1,11 @@
-"""Tests for the skeletons of the ingestion pipeline and the RAG subgraph.
+"""Tests for the RAG subgraph skeleton and the data contracts of the ingestion pipeline.
 
-Until Phases 2 and 3 these modules are typed skeletons. The tests pin what the later phases
-build on: the node names and their order, the node signatures with their explicit
-dependencies, the builder's signature, the data models, the metadata keys and the planned
-stubs. That importing the modules stays light is checked in test_imports.py.
+Until Phase 3 the RAG subgraph is a typed skeleton. The tests pin what Phase 3 builds on: the
+node names and their order, the node signatures with their explicit dependencies, the
+builder's signature and the planned stubs. They also pin the data contracts that the
+ingestion pipeline (Phase 2, tested in test_ingestion.py) shares with the subgraph: the index
+statistics, the chunking configuration and the metadata keys. That importing the modules stays
+light is checked in test_imports.py.
 """
 
 import inspect
@@ -22,10 +24,10 @@ from pydantic import ValidationError
 
 from agentic_rag.config import Settings
 from agentic_rag.errors import PlannedFeatureError, planned
-from agentic_rag.ingestion import chunking, index, loaders
 from agentic_rag.ingestion.chunking import (
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
+    DEFAULT_CODE_BLOCK_LIMIT,
     DEFAULT_SEPARATORS,
     ChunkingConfig,
     ChunkMetadata,
@@ -57,7 +59,7 @@ RAG_DEPENDENCY_TYPES: dict[str, Any] = {
     "min_score": float,
 }
 
-SKELETON_MODULES = (loaders, chunking, index, nodes, graph)
+SKELETON_MODULES = (nodes, graph)
 DOCUMENT = Document(page_content="Some text.", metadata={"source": "guide.md"})
 
 
@@ -68,24 +70,6 @@ def unopened_index() -> VectorStore:
 
 # Every public function of the skeleton modules: its phase and a call with valid arguments.
 STUB_CALLS: dict[str, tuple[int, Callable[[Settings], object]]] = {
-    "agentic_rag.ingestion.loaders.list_corpus_files": (
-        2,
-        lambda settings: loaders.list_corpus_files(settings.data_dir),
-    ),
-    "agentic_rag.ingestion.loaders.load_file": (
-        2,
-        lambda settings: loaders.load_file(
-            settings.data_dir / "guide.md", data_dir=settings.data_dir
-        ),
-    ),
-    "agentic_rag.ingestion.loaders.load_documents": (2, loaders.load_documents),
-    "agentic_rag.ingestion.chunking.build_splitter": (2, lambda _: chunking.build_splitter()),
-    "agentic_rag.ingestion.chunking.split_documents": (
-        2,
-        lambda _: chunking.split_documents([DOCUMENT]),
-    ),
-    "agentic_rag.ingestion.index.build_index": (2, index.build_index),
-    "agentic_rag.ingestion.index.load_index": (2, index.load_index),
     "agentic_rag.rag.nodes.rewrite_query": (
         3,
         lambda _: nodes.rewrite_query({"query": "q"}, chat_model=None),
@@ -206,16 +190,8 @@ def test_every_public_function_of_the_skeletons_is_a_listed_stub() -> None:
 
 
 def test_stubs_accept_their_documented_keyword_arguments(settings: Settings) -> None:
-    calls: list[Callable[[], object]] = [
-        lambda: index.build_index(settings, rebuild=True),
-        lambda: graph.build_rag_graph(settings=settings),
-        lambda: chunking.build_splitter(ChunkingConfig()),
-        lambda: chunking.split_documents([DOCUMENT], config=ChunkingConfig()),
-    ]
-
-    for call in calls:
-        with pytest.raises(PlannedFeatureError):
-            call()
+    with pytest.raises(PlannedFeatureError):
+        graph.build_rag_graph(settings=settings)
 
 
 # --- data models and metadata contracts -----------------------------------------------------
@@ -265,8 +241,10 @@ def test_default_chunking_is_inside_the_planned_range() -> None:
     assert ChunkingConfig() == ChunkingConfig(
         chunk_size=DEFAULT_CHUNK_SIZE,
         chunk_overlap=DEFAULT_CHUNK_OVERLAP,
+        code_block_limit=DEFAULT_CODE_BLOCK_LIMIT,
         separators=DEFAULT_SEPARATORS,
     )
+    assert DEFAULT_CODE_BLOCK_LIMIT == 2 * DEFAULT_CHUNK_SIZE
     assert DEFAULT_SEPARATORS[-1] == ""
 
 
@@ -277,6 +255,7 @@ def test_default_chunking_is_inside_the_planned_range() -> None:
         {"chunk_size": 100, "chunk_overlap": 150},
         {"chunk_size": 0},
         {"chunk_overlap": -1},
+        {"chunk_size": 1000, "code_block_limit": 999},
         {"separators": ()},
     ],
 )
@@ -295,7 +274,7 @@ def test_chunking_config_is_immutable() -> None:
 def test_document_metadata_keys_are_source_fields() -> None:
     keys = DocumentMetadata.__required_keys__ | DocumentMetadata.__optional_keys__
 
-    assert keys == {"source", "title", "page", "section"}
+    assert keys == {"source", "title", "page", "section", "url"}
     assert keys <= set(Source.model_fields)
     assert DocumentMetadata.__required_keys__ == {"source"}
 

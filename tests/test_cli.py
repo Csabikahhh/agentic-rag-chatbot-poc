@@ -290,6 +290,131 @@ def test_ingest_passes_rebuild_and_prints_the_stats(
     ]
 
 
+class StandInDownloadError(RuntimeError):
+    """Stands in for agentic_rag.ingestion.download.DownloadError."""
+
+
+def test_ingest_download_fetches_the_sources_before_building_the_index(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    order: list[str] = []
+    sources = tmp_path / "sources.toml"
+    sources.write_text("", encoding="utf-8")
+
+    def download_sources(settings: Settings, *, sources_file: Path) -> None:
+        order.append(f"download {sources_file}")
+
+    def build_index(settings: Settings, *, rebuild: bool) -> Report:
+        order.append(f"build rebuild={rebuild}")
+        return Report(name="index", count=3)
+
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=download_sources,
+        DownloadError=StandInDownloadError,
+    )
+    install_module(monkeypatch, "agentic_rag.ingestion.index", build_index=build_index)
+
+    assert cli.main(["ingest", "--download", "--sources", str(sources), "--rebuild"]) == 0
+
+    assert order == [f"download {sources}", "build rebuild=True"]
+    assert json.loads(capsys.readouterr().out) == {"name": "index", "count": 3}
+
+
+def test_ingest_download_uses_the_repository_source_list_by_default(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Path] = []
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=lambda settings, *, sources_file: calls.append(sources_file),
+        DownloadError=StandInDownloadError,
+    )
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.index",
+        build_index=lambda settings, *, rebuild: Report(name="index", count=0),
+    )
+
+    # The tests run from the repository root, where data/sources.toml exists.
+    assert cli.main(["ingest", "--download"]) == 0
+
+    assert calls == [Path("data/sources.toml")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (
+            ["ingest", "--sources", "data/sources.toml"],
+            "--sources can only be used with --download",
+        ),
+        (["ingest", "--download", "--sources", "missing.toml"], "file not found: missing.toml"),
+    ],
+)
+def test_ingest_usage_errors(
+    argv: list[str], error: str, settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(argv) == 2
+
+    err = capsys.readouterr().err
+    assert "usage: agentic-rag ingest" in err
+    assert error in err
+
+
+def test_a_failed_download_prints_its_message_and_exits_with_1(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sources = tmp_path / "sources.toml"
+    sources.write_text("", encoding="utf-8")
+    error = StandInDownloadError("git is required to download the corpus")
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=raising(error),
+        DownloadError=StandInDownloadError,
+    )
+
+    assert cli.main(["ingest", "--download", "--sources", str(sources)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"agentic-rag ingest: {error}"
+    assert captured.out == ""
+
+
+def test_a_missing_corpus_prints_its_message_and_exits_with_1(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = FileNotFoundError("The corpus in data/raw has no documents")
+    install_module(monkeypatch, "agentic_rag.ingestion.index", build_index=raising(error))
+
+    assert cli.main(["ingest"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"agentic-rag ingest: {error}"
+    assert "Traceback" not in captured.err
+
+
+def test_ingest_builds_a_real_index_from_the_corpus(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (settings.data_dir / "guide.md").write_text("## Setup\n\nInstall it.\n", encoding="utf-8")
+
+    assert cli.main(["ingest"]) == 0
+
+    stats = json.loads(capsys.readouterr().out)
+    assert (stats["files"], stats["documents"], stats["chunks"]) == (1, 1, 1)
+    assert stats["embedding_provider"] == "fake"
+
+
 def test_eval_forwards_its_options(
     settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

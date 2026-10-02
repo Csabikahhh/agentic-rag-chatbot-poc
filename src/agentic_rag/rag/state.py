@@ -52,6 +52,9 @@ class Source(BaseModel):
     section: str | None = Field(
         default=None, description="Heading of the section the chunk belongs to, when known."
     )
+    url: str | None = Field(
+        default=None, description="Public URL of the document, for a downloaded source."
+    )
     score: float | None = Field(
         default=None, description="Relevance score; higher means more relevant."
     )
