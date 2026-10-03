@@ -40,15 +40,14 @@ clash with the arguments LangGraph injects (``config``, ``runtime``, ``writer``,
 registers each node under its explicit name; the ``Send`` workers also get
 ``input_schema=SubtaskInput``, because a partial hides the type hint LangGraph would infer it
 from. Expensive resources, the vector store with its embedding model, are passed as
-lock-guarded, lazily initialised zero-argument providers (a bare ``functools.cache`` is not
-enough: concurrent first calls would each build the resource). Building a graph therefore
-loads nothing and stays offline, so ``export-graph`` can build it only to draw it.
+lock-guarded, lazily initialised zero-argument providers (``agentic_rag.rag.graph``). Building
+a graph therefore loads nothing and stays offline, so ``export-graph`` can build it only to
+draw it.
 
-Execution model: the nodes are sync. The UI streams with ``graph.stream(...,
-stream_mode=["updates", "values"], version="v2")``, the load test calls ``graph.invoke`` from a
-``ThreadPoolExecutor(max_workers=concurrency)``, and LangGraph runs the parallel ``Send``
-workers of a step in threads. An ``async def`` node would break the sync ``stream``, which
-raises ``TypeError`` for a node without a sync implementation.
+Execution model: the nodes are sync, and LangGraph runs the parallel ``Send`` workers of a
+step in threads; the UI, the evaluation and the load test all take this synchronous path
+(``docs/architecture.md``, *Execution model*). An ``async def`` node would break the UI's sync
+``stream``.
 
 Retries: :data:`RETRY_POLICY` (three attempts with LangGraph's default backoff) applies to the
 four LLM nodes and to ``run_rag_subtask``. LangGraph's default ``retry_on`` retries connection

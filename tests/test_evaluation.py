@@ -53,6 +53,7 @@ from agentic_rag.evaluation.runner import (
     write_report,
 )
 from agentic_rag.ingestion.index import build_index
+from agentic_rag.ingestion.sources import MANIFEST_NAME
 from agentic_rag.llm import FakeRule, ScriptedChatModel
 from agentic_rag.reports import RESULTS_DIR, RunReport
 
@@ -819,10 +820,11 @@ def test_the_committed_question_set_covers_every_route_and_both_languages() -> N
     assert {"direct", "single", "complex", "tool"} <= intents
     assert any("hungarian" in item.tags for item in items)
     assert any("out-of-scope" in item.tags for item in items)
+    # Checked against the sources that were downloaded: a fresh clone has only data/raw/.gitkeep.
     corpus = REPO_ROOT / "data" / "raw"
-    if corpus.is_dir() and any(corpus.iterdir()):  # The downloaded corpus, when present.
-        for item in items:
-            for document in item.expected_documents:
+    for item in items:
+        for document in item.expected_documents:
+            if (corpus / document.split("/", 1)[0] / MANIFEST_NAME).is_file():
                 assert (corpus / document).is_file(), f"{item.id}: {document} is not in the corpus"
 
 

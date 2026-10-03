@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 8 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; and `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own; and a functional evaluation of 17 questions measures routing, retrieval, correctness and faithfulness, and a load test finds the bottleneck (see [Evaluation](#evaluation)). Next: Phase 9 (the documentation polish). Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** complete (2026-10-03): every phase of the [build order](docs/project-structure-plan.md#8-build-order) is done. A [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own. A functional evaluation of 17 questions measures routing, retrieval, correctness and faithfulness, and a load test finds the bottleneck (see [Evaluation](#evaluation)). CI runs the lint, the offline tests and the image build on every push.
 
 ## Contents
 
@@ -63,7 +63,7 @@ Status of each requirement from the brief:
 
 **Documentation**
 
-- [ ] This README: problem & goals, architecture & design rationale, evaluation & load-test results, setup & run guide
+- [x] This README: problem & goals, architecture & design rationale, evaluation & load-test results, setup & run guide
 
 ## Problem statement and motivation
 
@@ -211,16 +211,16 @@ uv run agentic-rag loadtest --requests 100 --concurrency 4
 - For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The default model, `qwen3.5:4b` (4-bit, 3.4 GB, thinking off), fits in an 8 GB GPU with room to spare and also runs on the CPU, more slowly; with one request at a time it answered in 3.6 s at the median on an RTX 5070 Laptop GPU. Measured with the former default, the 7B model, in the Compose stack: on the CPU the `ollama` container used 7.7 GB of RAM and answered in 20–60 s; with the GPU override, warm answers took 3–10 s. Fake mode needs neither a model nor a GPU.
 - Disk space for the full stack: the application image (3.02 GB measured), the Ollama image (9.3 GB), the chat model (3.4 GB), the embedding model and the corpus with its index (about 640 MB together).
 
-### What works today
+### What works
 
-The foundation and the knowledge base run end to end, but the chatbot does not answer questions yet:
+Checked end to end on the development machine (Windows 11, 24-core CPU, RTX 5070 Laptop GPU):
 
 - the tests pass offline, with the fake LLM and the fake embeddings;
 - the CLI lists its commands and `config` prints the effective settings;
 - `ingest --download` downloads the corpus and builds the vector index, and a plain `ingest` keeps the index in step with the corpus. Measured on the development machine (24-core CPU): the download takes about 25 s, the first build about 6 minutes (embedding the 18 654 chunks with the default model on the CPU), and a repeated `ingest` 8 s, because unchanged chunks are not embedded again. A query against the index takes about 10 ms after the model has loaded (about 11 s);
-- the RAG subgraph answers `invoke({"query": ...})` with a cited context and its sources. In fake mode it skips the model calls; with Ollama it rewrites and grades (measured with Qwen2.5-7B-Instruct on a laptop GPU, see *Design decisions*). A question outside the corpus, such as *What is the capital of France?*, gets an empty context;
+- the RAG subgraph answers `invoke({"query": ...})` with a cited context and its sources. In fake mode it skips the model calls; with Ollama it rewrites and grades (measured with Qwen2.5-7B-Instruct, the former default, on a laptop GPU, see *Design decisions*). A question outside the corpus, such as *What is the capital of France?*, gets an empty context;
 - `eval` runs the question set through the graph or one node, and `loadtest` sends it under load; both write a JSON report and its Markdown summary and print the summary;
-- the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. Measured with Qwen2.5-7B-Instruct on a laptop GPU, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
+- the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. With the default `qwen3.5:4b`, one request at a time, the median is 3.6 s (load test); measured with Qwen2.5-7B-Instruct, the former default, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
 - the Streamlit UI streams the main workflow: the step panel shows each step as it finishes, groups the parallel ones by LangGraph step and lists under each search the steps of the RAG subgraph (the English search query, the retrieved and the kept chunks), and the retrieved-context panel shows the numbered sources with a link to each page. The empty chat offers one example question per route (a search, a comparison asked in Hungarian, one question per tool), which also work with the fake LLM. A missing index, an index built with other embeddings, an unreachable Ollama and a model that is not pulled are explained in the chat with the fix. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - from a fresh clone, `docker compose up --build` pulls the chat model, downloads the corpus, builds the index and serves the UI with no other step (measured: 25 minutes for the first start on the development machine, 11 s for a restart); in fake mode a single container is ready in about 45 s.
 
@@ -265,7 +265,9 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `807 passed, 1 deselected` (measured on 2026-10-03; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `807 passed, 1 deselected` (measured on 2026-10-03). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+
+**CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same checks on every push and pull request: `uv sync --locked`, `ruff check`, `ruff format --check` and `pytest` in fake mode, then `docker build` and the image's `agentic-rag --version`. No model, GPU or corpus is needed.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -428,6 +430,7 @@ The details are in [docs/architecture.md](docs/architecture.md#errors-and-exit-c
 ```text
 agentic-rag-chatbot-poc/
 ├── .claude/                        # Claude Code agents and skills used while building the project
+├── .github/workflows/ci.yml        # CI: lint, format check, offline tests, image build
 ├── data/
 │   ├── README.md                   # data layout, corpus rules, when to rebuild the index
 │   ├── sources.toml                # the corpus sources: repositories, pinned commits, patterns, licenses
@@ -438,6 +441,8 @@ agentic-rag-chatbot-poc/
 │       └── results/                # committed evaluation and load-test reports (JSON and Markdown)
 ├── docs/
 │   ├── architecture.md             # target graphs, state and cross-cutting contracts, configuration reference
+│   ├── evaluation.md               # functional evaluation: method, results, model comparison, conclusions
+│   ├── performance.md              # load test: results, per-node breakdown, bottleneck, proposals
 │   ├── project-structure-plan.md   # repository plan and build order
 │   └── project-structure-plan.hu.md  # the plan in Hungarian
 ├── src/
@@ -490,10 +495,10 @@ agentic-rag-chatbot-poc/
 │   ├── test_config.py              # defaults, environment and .env handling, validation, logging
 │   ├── test_embeddings.py          # offline fake and Hugging Face branch, without downloads
 │   ├── test_agent_graph.py         # main workflow: contract, routing, nodes, every route in fake mode
-│   ├── test_evaluation.py          # dataset loader, metrics and report models
+│   ├── test_evaluation.py          # dataset loader, metrics, judge, run_evaluation and the reports
 │   ├── test_ingestion.py           # sources, download (local git repository), cleaning, chunking, index
 │   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`, deselected by default)
-│   ├── test_loadtest.py            # percentiles, latency summaries and the report model
+│   ├── test_loadtest.py            # percentiles, run_load_test on a small index, the report and its summary
 │   ├── test_rag_subgraph.py        # RAG nodes with stand-ins; the compiled subgraph on a small index
 │   ├── test_state.py               # state contracts and reducers
 │   ├── test_tools.py               # contrast, specificity, browser support and the tool layer
@@ -516,7 +521,7 @@ agentic-rag-chatbot-poc/
 
 Every package directory also has an `__init__.py`. Generated and local-only paths are not shown: `.venv/`, the tool caches and `data/chroma_db/` (the vector index, created by `agentic-rag ingest`). [data/README.md](data/README.md) describes the data layout, the corpus rules and when to rebuild the index; [data/eval/README.md](data/eval/README.md) describes the evaluation formats.
 
-The structure grows with the phases of the [build order](docs/project-structure-plan.md#8-build-order): the corpus, the evaluation set, the evaluation and performance reports in `docs/`, and the tests of each phase.
+The [build order](docs/project-structure-plan.md#8-build-order) of the plan records which phase added which part, and its [section 12](docs/project-structure-plan.md#12-deviations-from-the-plan) where the result differs from the plan.
 
 ## License
 

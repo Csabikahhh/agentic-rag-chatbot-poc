@@ -18,19 +18,18 @@ are merged later. They share :class:`~agentic_rag.agent.state.AgentState`:
 :class:`~agentic_rag.agent.state.SubtaskInput` instead of the shared state, and LangGraph runs
 the workers of a planning round in parallel (see ``agentic_rag.agent.routing``).
 
-Conventions for every node (the node convention and the execution model are described once,
-in ``agentic_rag.agent.graph``):
+Every node follows the node convention of ``agentic_rag.agent.graph`` (the state as the only
+positional parameter, keyword-only dependencies bound by ``build_agent_graph``, a ``dict``
+partial update), and in addition:
 
-- It is a sync function named after its node and decorated with
-  ``agentic_rag.tracing.traced``, so each execution appends one ``TraceEvent`` with the node's
-  name and a one-line summary to ``trace``.
-- The state (or the ``Send`` payload) is the only positional parameter. Dependencies are
-  keyword-only parameters without defaults, bound by ``build_agent_graph``: ``chat_model``
-  (from ``agentic_rag.llm.get_chat_model``), ``tools`` (the non-retrieval tools by name) and
-  ``search_tool`` (the ``search_knowledge_base`` tool). Tests call a node directly with a
-  scripted chat model or a fake tool.
-- It returns a ``dict`` partial update and never mutates the state. Keys without a reducer may
-  be missing, so they are read with ``state.get(...)``.
+- It is named after its node and decorated with ``agentic_rag.tracing.traced``, so each
+  execution appends one ``TraceEvent`` with the node's name and a one-line summary to
+  ``trace``.
+- Its dependencies are ``chat_model`` (from ``agentic_rag.llm.get_chat_model``), ``tools``
+  (the non-retrieval tools by name) and ``search_tool`` (the ``search_knowledge_base`` tool).
+  Tests call a node directly with a scripted chat model or a fake tool.
+- It never mutates the state, and reads the keys without a reducer, which may be missing,
+  with ``state.get(...)``.
 - LLM nodes use structured output into the Pydantic models of ``agentic_rag.agent.prompts``
   (plan decision 7) and format their prompts from the raw state inside the node.
 - Failures: transient errors (for example an unreachable Ollama server) are retried by the

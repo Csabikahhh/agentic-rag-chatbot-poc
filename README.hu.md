@@ -4,7 +4,7 @@
 
 Agentic RAG (Retrieval-Augmented Generation) alapú chatbot prototípus Pythonban – [LangGraph](https://github.com/langchain-ai/langgraph) frameworkkel, helyben futó, nyílt forráskódú LLM-mel és [Streamlit](https://streamlit.io/) felülettel, Dockerrel teljesen konténerizálva.
 
-> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2–8. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow pedig minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait; a `docker compose up --build` pedig friss klónból elindítja a teljes stacket, és magától letölti a modellt és a korpuszt, valamint felépíti az indexet; egy 17 kérdéses funkcionális értékelés pedig méri a routingot, a visszakeresést, a válaszok helyességét és hűségét, egy terheléses teszt pedig megtalálja a szűk keresztmetszetet (lásd [Értékelés](#értékelés)). Következik a 9. fázis (a dokumentáció csiszolása). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
+> **Állapot:** kész (2026. 10. 03.): a [felépítési sorrend](docs/project-structure-plan.hu.md#8-felépítési-sorrend) minden fázisa elkészült. [Frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait; a `docker compose up --build` friss klónból elindítja a teljes stacket, és magától letölti a modellt és a korpuszt, valamint felépíti az indexet. Egy 17 kérdéses funkcionális értékelés méri a routingot, a visszakeresést, a válaszok helyességét és hűségét, egy terheléses teszt pedig megtalálja a szűk keresztmetszetet (lásd [Értékelés](#értékelés)). A CI minden pushnál lefuttatja a lintet, az offline teszteket és a képfájl buildjét.
 
 ## Tartalom
 
@@ -63,7 +63,7 @@ A feladatkiírás egyes követelményeinek állapota:
 
 **Dokumentáció**
 
-- [ ] Ez a README: a probléma és a célkitűzés, az architektúra és a tervezési döntések indoklása, az értékelés és a terheléses teszt eredményei, telepítési és futtatási útmutató
+- [x] Ez a README: a probléma és a célkitűzés, az architektúra és a tervezési döntések indoklása, az értékelés és a terheléses teszt eredményei, telepítési és futtatási útmutató
 
 ## Problémafelvetés és motiváció
 
@@ -211,16 +211,16 @@ uv run agentic-rag loadtest --requests 100 --concurrency 4
 - Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az alapértelmezett modell, a `qwen3.5:4b` (4 bites, 3,4 GB, gondolkodás nélkül) bőven elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban; egyszerre egy kéréssel egy RTX 5070 Laptop GPU-n 3,6 s volt a medián válaszidő. A korábbi alapértelmezett, 7B-s modellel a Compose stackben mérve: CPU-n az `ollama` konténer 7,7 GB RAM-ot használt, és 20–60 s alatt válaszolt; a GPU-s override-dal a meleg válaszok 3–10 s-ig tartottak. A fake módhoz nem kell sem modell, sem GPU.
 - Lemezterület a teljes stackhez: az alkalmazás képfájlja (mérve 3,02 GB), az Ollama képfájlja (9,3 GB), a chatmodell (3,4 GB), az embedding modell, valamint a korpusz az indexével (együtt kb. 640 MB).
 
-### Ami már most működik
+### Ami működik
 
-Az alapok és a tudásbázis végponttól végpontig futnak, de a chatbot kérdésekre még nem válaszol:
+A fejlesztői gépen végponttól végpontig ellenőrizve (Windows 11, 24 magos CPU, RTX 5070 Laptop GPU):
 
 - a tesztek offline, a fake LLM-mel és a fake embeddinggel átmennek;
 - a parancssori felület kilistázza a parancsait, a `config` kiírja az érvényes beállításokat;
 - az `ingest --download` letölti a korpuszt és felépíti a vektorindexet, a sima `ingest` pedig szinkronban tartja az indexet a korpusszal. A fejlesztői gépen (24 magos CPU) mérve: a letöltés kb. 25 s, az első felépítés kb. 6 perc (a 18 654 chunk beágyazása az alapértelmezett modellel, CPU-n), egy ismételt `ingest` pedig 8 s, mert a változatlan chunkokat nem ágyazza be újra. Egy lekérdezés kb. 10 ms, miután a modell betöltődött (ez kb. 11 s);
-- a RAG algráf az `invoke({"query": ...})` hívásra hivatkozásokkal ellátott kontextust és forrásokat ad vissza. Fake módban kihagyja a modellhívásokat, Ollamával átír és értékel (a Qwen2.5-7B-Instruct modellel, laptop GPU-n mérve, lásd: *Tervezési döntések*). A korpuszon kívüli kérdésre, például a *What is the capital of France?* kérdésre üres kontextus a válasz;
+- a RAG algráf az `invoke({"query": ...})` hívásra hivatkozásokkal ellátott kontextust és forrásokat ad vissza. Fake módban kihagyja a modellhívásokat, Ollamával átír és értékel (a korábbi alapértelmezett Qwen2.5-7B-Instruct modellel, laptop GPU-n mérve, lásd: *Tervezési döntések*). A korpuszon kívüli kérdésre, például a *What is the capital of France?* kérdésre üres kontextus a válasz;
 - az `eval` a kérdéskészletet a gráfon vagy egy node-on futtatja, a `loadtest` pedig terhelés alatt küldi; mindkettő JSON-riportot és Markdown-összefoglalót ír, és kiírja az összefoglalót;
-- a fő workflow válaszol: fake módban szkriptelt válaszokkal, amelyek minden útvonalat bejárnak (köszönés, egy keresés, két párhuzamos keresés, eszközhívás), Ollamával valódi válaszokkal. A Qwen2.5-7B-Instruct modellel, laptop GPU-n, melegen mérve: közvetlen válasz 0,5–3 s, eszközkérdés 2–9 s, keresést igénylő kérdés 8–30 s (egy folyamat első keresése az embedding modellt is betölti, kb. 16 s); a részletek a [docs/architecture.md](docs/architecture.md#measured-with-ollama) fájlban;
+- a fő workflow válaszol: fake módban szkriptelt válaszokkal, amelyek minden útvonalat bejárnak (köszönés, egy keresés, két párhuzamos keresés, eszközhívás), Ollamával valódi válaszokkal. Az alapértelmezett `qwen3.5:4b` modellel, egyszerre egy kéréssel a medián 3,6 s (terheléses teszt); a korábbi alapértelmezett Qwen2.5-7B-Instruct modellel, laptop GPU-n, melegen mérve: közvetlen válasz 0,5–3 s, eszközkérdés 2–9 s, keresést igénylő kérdés 8–30 s (egy folyamat első keresése az embedding modellt is betölti, kb. 16 s); a részletek a [docs/architecture.md](docs/architecture.md#measured-with-ollama) fájlban;
 - a Streamlit UI a fő workflow-t streameli: a lépéspanel minden lépést megmutat, amint elkészül, a párhuzamosakat LangGraph-lépés szerint csoportosítja, és minden keresés alatt felsorolja a RAG algráf lépéseit (az angol keresőkifejezést, a visszakeresett és a megtartott chunkokat); a visszakeresett kontextus panel a számozott forrásokat mutatja, mindegyiket az oldala linkjével. Az üres chat útvonalanként egy példakérdést kínál (egy keresés, egy magyarul feltett összehasonlítás, eszközönként egy kérdés), amelyek a fake LLM-mel is működnek. A hiányzó indexet, a más embeddinggel épített indexet, az elérhetetlen Ollamát és a le nem töltött modellt a chat a javítás módjával együtt elmagyarázza. A felhasználó által megállított futás a *Stopped before an answer was produced.* üzenetet kapja, az ágens az új kérdés mellett csak a korábbi megválaszolt kérdéseket kapja meg, a válaszok `$` jelei szövegként jelennek meg (LaTeX nélkül), érvénytelen beállítás vagy olvashatatlan `.env` esetén pedig a chat helyén *Invalid configuration* hiba áll;
 - friss klónból a `docker compose up --build` minden további lépés nélkül letölti a chatmodellt és a korpuszt, felépíti az indexet, és kiszolgálja a UI-t (mérve a fejlesztői gépen: első indítás 25 perc, újraindítás 11 s); fake módban egyetlen konténer kb. 45 s alatt áll készen.
 
@@ -265,7 +265,9 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fájlt, ha a lock fájl nem egyezik a `pyproject.toml`-lal; a képfájl buildje ugyanezt az ellenőrzést használja.
 
-A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `807 passed, 1 deselected` (2026. 10. 03-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
+A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `807 passed, 1 deselected` (2026. 10. 03-án mérve). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
+
+**CI.** A [`.github/workflows/ci.yml`](.github/workflows/ci.yml) minden pushnál és pull requestnél ugyanezeket az ellenőrzéseket futtatja: `uv sync --locked`, `ruff check`, `ruff format --check` és `pytest` fake módban, majd `docker build` és a képfájl `agentic-rag --version` parancsa. Ehhez nem kell sem modell, sem GPU, sem korpusz.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 
@@ -428,6 +430,7 @@ A részletek a [docs/architecture.md](docs/architecture.md#errors-and-exit-codes
 ```text
 agentic-rag-chatbot-poc/
 ├── .claude/                        # a fejlesztéshez használt Claude Code ágensek és skillek
+├── .github/workflows/ci.yml        # CI: lint, formázás, offline tesztek, képfájl-build
 ├── data/
 │   ├── README.md                   # az adatok elrendezése, a korpusz szabályai, az index újraépítése
 │   ├── sources.toml                # a korpusz forrásai: repositoryk, rögzített commitok, minták, licencek
@@ -438,6 +441,8 @@ agentic-rag-chatbot-poc/
 │       └── results/                # commitolt értékelési és terheléses riportok (JSON és Markdown)
 ├── docs/
 │   ├── architecture.md             # célgráfok, állapot- és átívelő szerződések, konfigurációs referencia (angol)
+│   ├── evaluation.md               # funkcionális értékelés: módszer, eredmények, modellek, következtetések (angol)
+│   ├── performance.md              # terheléses teszt: eredmények, node-onkénti bontás, szűk keresztmetszet, javaslatok (angol)
 │   ├── project-structure-plan.md   # a repository terve és felépítési sorrendje (angol)
 │   └── project-structure-plan.hu.md  # ugyanez magyarul
 ├── src/
@@ -490,10 +495,10 @@ agentic-rag-chatbot-poc/
 │   ├── test_config.py              # alapértékek, környezeti változók és .env, ellenőrzés, naplózás
 │   ├── test_embeddings.py          # offline fake és Hugging Face ág, letöltés nélkül
 │   ├── test_agent_graph.py         # fő workflow: szerződés, routing, node-ok, minden útvonal fake módban
-│   ├── test_evaluation.py          # kérdésbetöltő, metrikák és riportmodellek
+│   ├── test_evaluation.py          # kérdésbetöltő, metrikák, bíró, run_evaluation és a riportok
 │   ├── test_ingestion.py           # források, letöltés (helyi git repository), tisztítás, darabolás, index
 │   ├── test_llm.py                 # provider-választás, szkriptelt fake; élő Ollama-ellenőrzés (`ollama` marker, alapból kihagyva)
-│   ├── test_loadtest.py            # percentilisek, válaszidő-összesítések és a riportmodell
+│   ├── test_loadtest.py            # percentilisek, run_load_test kis indexen, a riport és összefoglalója
 │   ├── test_rag_subgraph.py        # a RAG node-ok helyettesítőkkel; a lefordított algráf egy kis indexen
 │   ├── test_state.py               # állapotsémák és reducerek
 │   ├── test_tools.py               # kontraszt, specificitás, böngészőtámogatás és az eszközréteg
@@ -516,7 +521,7 @@ agentic-rag-chatbot-poc/
 
 Minden csomagkönyvtárban `__init__.py` is van. A generált és csak helyi útvonalak nem szerepelnek: a `.venv/`, az eszközök cache-ei és a `data/chroma_db/` (a vektorindex, amelyet az `agentic-rag ingest` hoz létre). A [data/README.md](data/README.md) az adatok elrendezését, a korpusz szabályait és az index újraépítésének eseteit, a [data/eval/README.md](data/eval/README.md) az értékelés formátumait írja le (mindkettő angolul).
 
-A struktúra a [felépítési sorrend](docs/project-structure-plan.hu.md#8-felépítési-sorrend) fázisaival bővül: a korpusszal, az értékelő készlettel, a `docs/` mappába kerülő értékelési és teljesítményriportokkal, valamint az egyes fázisok tesztjeivel.
+A terv [felépítési sorrendje](docs/project-structure-plan.hu.md#8-felépítési-sorrend) rögzíti, melyik fázis mit adott hozzá, a [12. szakasza](docs/project-structure-plan.hu.md#12-eltérések-a-tervtől) pedig azt, hol tér el az eredmény a tervtől.
 
 ## Licenc
 

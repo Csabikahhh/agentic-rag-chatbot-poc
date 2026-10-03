@@ -11,11 +11,10 @@ The four nodes run in this order and exchange data only through ``RagState``:
 
 Contract:
 
-- The node convention of both graphs, described in ``agentic_rag.agent.graph``, applies.
-  The state is the only positional parameter. Dependencies are keyword-only parameters
-  without defaults, which ``agentic_rag.rag.graph.build_rag_graph`` binds once per compiled
-  graph, so tests can call a node directly with stand-ins. Each node takes only what its role
-  in plan section 5.2 needs:
+- The node convention of both graphs, described in ``agentic_rag.agent.graph``, applies:
+  ``agentic_rag.rag.graph.build_rag_graph`` binds the keyword-only dependencies once per
+  compiled graph, so tests can call a node directly with stand-ins. Each node takes only
+  what its role in plan section 5.2 needs:
 
   - ``rewrite_query`` (optional LLM rewrite): ``chat_model``, or None to skip the rewrite.
   - ``retrieve`` (top-k similarity search): ``vector_store``, a zero-argument provider of the
@@ -24,7 +23,7 @@ Contract:
     ``chat_model``, or None to skip the LLM grade.
   - ``build_context`` (de-duplicate, order, format): nothing; it only formats.
 
-- Nodes are synchronous functions. They return partial updates and never mutate the state.
+- Nodes never mutate the state.
 - ``documents`` and ``scores`` are parallel lists (``scores[i]`` belongs to ``documents[i]``).
   Higher scores are more relevant, and the lists stay in rank order, most relevant first,
   from ``retrieve`` to ``build_context``.
