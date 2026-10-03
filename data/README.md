@@ -29,7 +29,7 @@ These are the documents the chatbot answers from: the official documentation of 
   - `section`: the H2 and H3 headings, for example `Usage > Adding state to a component`;
   - `url`: the page on the documentation site;
   - `page` (1-based), for paged formats, which this corpus does not have.
-- **Container.** The image contains no corpus. Compose mounts `./data/raw` read-only at `/app/data/raw`.
+- **Container.** The image contains no corpus, only `sources.toml`. At start-up the container downloads the corpus into the named volume `corpus-data`, mounted at `/app/data/raw` (`agentic-rag serve` with `INGEST_ON_START`); the host's `data/raw` is not mounted.
 
 ## `eval/`: the evaluation set
 
@@ -41,4 +41,4 @@ The index is generated and never edited by hand. It is gitignored by the `chroma
 
 - **Build it** with `agentic-rag ingest` (or `python -m agentic_rag ingest`); `ingest --download` first downloads the corpus. Every run makes the index match the corpus: it embeds and stores the chunks the index does not hold yet, then deletes the stored chunks that the run did not produce. A plain `ingest` therefore picks up added, edited, shortened and removed files and changes to the chunking, and running it twice changes nothing: an unchanged corpus embeds nothing (8 s for the whole corpus, against about 6 minutes for the first build on the CPU). A corpus without documents stops the command instead of emptying the index.
 - **Rebuild it** with `agentic-rag ingest --rebuild` after you change `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`. This includes switching between the offline fake embeddings and the Hugging Face model. `--rebuild` discards the index and builds it from scratch, because vectors of different models are not comparable. The index records the provider and the model it was built with, so a plain `ingest` or a query with another one fails (`EmbeddingMismatchError`, exit code 2) instead of mixing the vectors of two models or returning meaningless matches.
-- **Container.** The index lives in the named volume `chroma-data`, mounted at `/app/data/chroma_db`, so it survives image rebuilds. `docker compose down -v` deletes it. Build it with `docker compose run --rm --no-deps app agentic-rag ingest` after downloading the corpus on the host; from Phase 6 on, with `INGEST_ON_START=true`, the container builds it at start-up when it is missing.
+- **Container.** The index lives in the named volume `chroma-data`, mounted at `/app/data/chroma_db`, in one directory per embedding provider (`CHROMA_DIR=/app/data/chroma_db/<EMBEDDING_PROVIDER>`), so it survives image rebuilds and switching between the full stack and fake mode. The container builds it at start-up when it is missing and brings it up to date otherwise; `docker compose run --rm --no-deps app agentic-rag ingest --rebuild` rebuilds it. `docker compose down -v` deletes it.

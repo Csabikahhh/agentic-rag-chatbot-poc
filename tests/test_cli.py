@@ -6,6 +6,7 @@ The handlers import their target modules lazily. These tests put stand-in module
 
 import json
 import logging
+import signal
 import subprocess
 import sys
 import types
@@ -20,7 +21,7 @@ from agentic_rag import __version__, cli
 from agentic_rag.config import Settings
 from agentic_rag.errors import ConfigurationError, InvalidArgumentError, planned
 
-COMMANDS = ("ingest", "eval", "loadtest", "export-graph", "config")
+COMMANDS = ("ingest", "eval", "loadtest", "export-graph", "config", "serve")
 
 
 def install_module(
@@ -578,6 +579,145 @@ def test_export_graph_raw_mermaid_needs_a_single_graph(
     assert cli.main(["export-graph", "--format", "mermaid"]) == 2
 
     assert "choose --graph agent or --graph rag" in capsys.readouterr().err
+
+
+# --- serve --------------------------------------------------------------------------------
+
+
+def serve_stand_ins(
+    monkeypatch: pytest.MonkeyPatch,
+    prepare: Callable[[Settings], Any] | None = None,
+    exit_code: int = 0,
+) -> tuple[list[Settings], list[list[str]]]:
+    """Replace the start-up preparation and the start of Streamlit for one ``serve`` run.
+
+    Returns:
+        The settings of every preparation and the command of every start, in call order.
+    """
+    prepared: list[Settings] = []
+    started: list[list[str]] = []
+
+    def prepare_knowledge_base(settings: Settings) -> None:
+        prepared.append(settings)
+        if prepare is not None:
+            prepare(settings)
+
+    def start(command: list[str]) -> int:
+        started.append(command)
+        return exit_code
+
+    install_module(
+        monkeypatch, "agentic_rag.ingestion.prepare", prepare_knowledge_base=prepare_knowledge_base
+    )
+    install_module(
+        monkeypatch, "agentic_rag.ingestion.download", DownloadError=StandInDownloadError
+    )
+    monkeypatch.setattr(cli, "_start", start)
+    return prepared, started
+
+
+def test_serve_prepares_the_knowledge_base_then_starts_the_ui(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, started = serve_stand_ins(monkeypatch)
+
+    assert cli.main(["serve", "--address", "0.0.0.0", "--port", "8600"]) == 0
+
+    assert prepared == [settings]
+    assert started == [
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(cli.UI_SCRIPT),
+            "--server.port=8600",
+            "--server.address=0.0.0.0",
+        ]
+    ]
+    assert cli.UI_SCRIPT.is_file()
+
+
+def test_serve_skips_the_preparation_when_ingest_on_start_is_off(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("INGEST_ON_START", "false")
+    prepared, started = serve_stand_ins(monkeypatch, exit_code=3)
+
+    assert cli.main(["serve"]) == 3  # The exit code of Streamlit.
+
+    assert prepared == []
+    assert started[0][-1] == "--server.port=8501"  # Streamlit's default address.
+
+
+def test_serve_starts_the_ui_when_the_preparation_fails(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _, started = serve_stand_ins(
+        monkeypatch, prepare=raising(StandInDownloadError("git fetch failed: no network"))
+    )
+
+    assert cli.main(["serve"]) == 0
+
+    assert len(started) == 1
+    (record,) = [
+        record
+        for record in caplog.records
+        if record.name == "agentic_rag.cli" and record.levelno == logging.ERROR
+    ]
+    assert record.getMessage().startswith(
+        "The knowledge base could not be prepared: git fetch failed: no network."
+    )
+
+
+def test_serve_lets_an_unexpected_preparation_error_propagate(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, started = serve_stand_ins(monkeypatch, prepare=raising(RuntimeError("bug")))
+
+    with pytest.raises(RuntimeError, match="bug"):
+        cli.main(["serve"])
+    assert started == []
+
+
+def test_sigterm_interrupts_the_preparation(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = signal.getsignal(signal.SIGTERM)
+    _, started = serve_stand_ins(
+        monkeypatch, prepare=lambda settings: signal.raise_signal(signal.SIGTERM)
+    )
+
+    assert cli.main(["serve"]) == 130  # What docker stop sends stops the preparation.
+
+    assert started == []
+    assert "Interrupted." in capsys.readouterr().err
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_serve_rejects_an_invalid_port(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["serve", "--port", "70000"]) == 2
+
+    assert "must be at most 65535, got 70000" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("replace_process", [True, False])
+def test_start_replaces_the_process_or_runs_a_child(
+    replace_process: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(cli, "_REPLACE_PROCESS", replace_process)
+    monkeypatch.setattr(cli.os, "execv", lambda path, args: calls.append(("execv", args)))
+    monkeypatch.setattr(cli.subprocess, "call", lambda args: calls.append(("call", args)) or 7)
+
+    result = cli._start(["python", "-m", "streamlit"])
+
+    if replace_process:
+        assert calls == [("execv", ["python", "-m", "streamlit"])]
+    else:
+        assert (calls, result) == ([("call", ["python", "-m", "streamlit"])], 7)
 
 
 # --- python -m agentic_rag in a fresh interpreter -----------------------------------------

@@ -4,7 +4,7 @@
 
 Agentic RAG (Retrieval-Augmented Generation) alapú chatbot prototípus Pythonban – [LangGraph](https://github.com/langchain-ai/langgraph) frameworkkel, helyben futó, nyílt forráskódú LLM-mel és [Streamlit](https://streamlit.io/) felülettel, Dockerrel teljesen konténerizálva.
 
-> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2–5. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow pedig minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait. Az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: jelzi, melyik fázisban készül el. Következik a 6. fázis (a konténer belépési pontja és a teljes stack futtatása), majd az értékelés. A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
+> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2–6. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow pedig minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait; a `docker compose up --build` pedig friss klónból elindítja a teljes stacket, és magától letölti a modellt és a korpuszt, valamint felépíti az indexet. Az értékelés és a terheléses teszt futtatója egyelőre típusannotált váz: jelzi, melyik fázisban készül el. Következik a 7. fázis (a funkcionális értékelés), majd a terheléses teszt. A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
 
 ## Tartalom
 
@@ -54,7 +54,7 @@ A feladatkiírás egyes követelményeinek állapota:
 
 - [ ] A helyi erőforrásokhoz illeszkedő, nyílt forráskódú LLM (fizetős API-k nélkül), a trade-offok indoklásával
 - [x] Streamlit prototípus UI, amely bemutatja az ágens működésének főbb lépéseit és a RAG folyamat eredményét
-- [ ] Konténerizálás: `Dockerfile` (kötelező) és `docker-compose.yml` (több komponens esetén előny)
+- [x] Konténerizálás: `Dockerfile` (kötelező) és `docker-compose.yml` (több komponens esetén előny)
 
 **Értékelés és teljesítmény**
 
@@ -171,8 +171,8 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 - Git.
 - Helyi fejlesztéshez [uv](https://docs.astral.sh/uv/getting-started/installation/); a Python 3.12-t is telepíti, ha hiányzik.
 - A konténerekhez Docker és Docker Compose 2.24 vagy újabb (a `compose.yaml` az opcionális `env_file` szintaxist használja).
-- Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az ideiglenes alapértelmezett modell, a `qwen2.5:7b-instruct` (4 bites, kb. 4,7 GB) elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban (*a pontos RAM/VRAM-igény még nincs meghatározva*). A fake módhoz nem kell sem modell, sem GPU.
-- Lemezterület a teljes stackhez: az alkalmazás képfájlja (kb. 2,9 GB; mérve 2,88 GB), az Ollama képfájlja és a chatmodell.
+- Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az ideiglenes alapértelmezett modell, a `qwen2.5:7b-instruct` (4 bites, kb. 4,7 GB) elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban. A Compose stackben mérve, az alapértelmezett `OLLAMA_NUM_CTX=8192` beállítással: CPU-n az `ollama` konténer 7,7 GB RAM-ot használt, és 20–60 s alatt válaszolt; a GPU-s override-dal minden réteg elfért a 8 GB VRAM-ban, a meleg válaszok pedig 3–10 s-ig tartottak. A fake módhoz nem kell sem modell, sem GPU.
+- Lemezterület a teljes stackhez: az alkalmazás képfájlja (mérve 3,02 GB), az Ollama képfájlja (9,3 GB), a chatmodell (4,7 GB), az embedding modell, valamint a korpusz az indexével (együtt kb. 640 MB).
 
 ### Ami már most működik
 
@@ -185,7 +185,7 @@ Az alapok és a tudásbázis végponttól végpontig futnak, de a chatbot kérd�
 - az `eval`, a `loadtest` és az `export-graph` kiírja, melyik fázisra van tervezve (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`), és 1-es kilépési kóddal áll le;
 - a fő workflow válaszol: fake módban szkriptelt válaszokkal, amelyek minden útvonalat bejárnak (köszönés, egy keresés, két párhuzamos keresés, eszközhívás), Ollamával valódi válaszokkal. A Qwen2.5-7B-Instruct modellel, laptop GPU-n, melegen mérve: közvetlen válasz 0,5–3 s, eszközkérdés 2–9 s, keresést igénylő kérdés 8–30 s (egy folyamat első keresése az embedding modellt is betölti, kb. 16 s); a részletek a [docs/architecture.md](docs/architecture.md#measured-with-ollama) fájlban;
 - a Streamlit UI a fő workflow-t streameli: a lépéspanel minden lépést megmutat, amint elkészül, a párhuzamosakat LangGraph-lépés szerint csoportosítja, és minden keresés alatt felsorolja a RAG algráf lépéseit (az angol keresőkifejezést, a visszakeresett és a megtartott chunkokat); a visszakeresett kontextus panel a számozott forrásokat mutatja, mindegyiket az oldala linkjével. Az üres chat útvonalanként egy példakérdést kínál (egy keresés, egy magyarul feltett összehasonlítás, eszközönként egy kérdés), amelyek a fake LLM-mel is működnek. A hiányzó indexet, a más embeddinggel épített indexet, az elérhetetlen Ollamát és a le nem töltött modellt a chat a javítás módjával együtt elmagyarázza. A felhasználó által megállított futás a *Stopped before an answer was produced.* üzenetet kapja, az ágens az új kérdés mellett csak a korábbi megválaszolt kérdéseket kapja meg, a válaszok `$` jelei szövegként jelennek meg (LaTeX nélkül), érvénytelen beállítás vagy olvashatatlan `.env` esetén pedig a chat helyén *Invalid configuration* hiba áll;
-- a képfájl felépül, és az `app` szolgáltatás fake módban egészséges (healthy) állapotban indul.
+- friss klónból a `docker compose up --build` minden további lépés nélkül letölti a chatmodellt és a korpuszt, felépíti az indexet, és kiszolgálja a UI-t (mérve a fejlesztői gépen: első indítás 25 perc, újraindítás 11 s); fake módban egyetlen konténer kb. 45 s alatt áll készen.
 
 ### Helyi fejlesztés uv-vel
 
@@ -228,7 +228,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fájlt, ha a lock fájl nem egyezik a `pyproject.toml`-lal; a képfájl buildje ugyanezt az ellenőrzést használja.
 
-A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `766 passed, 1 deselected` (2026. 10. 02-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
+A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `780 passed, 1 deselected` (2026. 10. 03-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 
@@ -249,12 +249,12 @@ A feladatkiírás `docker-compose.yml`-t kér; a repository ezt `compose.yaml` n
 | `ollama` | `ollama/ollama:0.35.0` | Az LLM kiszolgálója; a stacken belül a `http://ollama:11434` címen érhető el, a gépre nincs publikálva |
 | `ollama-pull` | `ollama/ollama:0.35.0` | Egyszeri futás: letölti az `OLLAMA_MODEL` modellt, ha az `ollama-data` volume-ban még nincs meg |
 
-A korpusz (`./data/raw`) csak olvashatóan van csatolva. Az `ollama-data` (Ollama modellek), a `chroma-data` (vektorindex) és a `hf-cache` (Hugging Face modellek) nevesített volume-ok az újraépítések között is megőrzik a letöltéseket és az indexet.
+A nevesített volume-ok az újraépítések között is megőrzik a letöltéseket és az indexet: `ollama-data` (Ollama modellek), `corpus-data` (a korpusz), `chroma-data` (a vektorindex, embedding providerenként külön könyvtárban, így a teljes stack és a fake mód közti váltás nem építi újra) és `hf-cache` (Hugging Face modellek). A gépről egyetlen könyvtár sincs csatolva.
 
-**A tudásbázis a konténerben.** A konténer nem tud írni a korpuszba, ezért azt előbb a gépen kell letölteni (`uv run agentic-rag ingest --download`, amely egy helyi indexet is felépít). A konténer saját indexe a `chroma-data` volume-ban van; amíg a 6. fázis belépési pontja induláskor fel nem építi (`INGEST_ON_START`), egyszer ezzel kell felépíteni:
+**A tudásbázis a konténerben.** Az alkalmazás parancsa, az `agentic-rag serve`, a UI indítása előtt előkészíti a tudásbázist (`INGEST_ON_START=true`, az alapérték): letölti azokat a korpuszforrásokat, amelyek még nincsenek a `corpus-data` volume-ban (gittel, a `data/sources.toml` rögzített commitjairól), majd felépíti az indexet, vagy a korpuszhoz igazítja; a más embeddinggel épített indexet újraépíti. A gépen semmit nem kell előkészíteni, egy újraindítás pedig néhány másodperc alatt ellenőrzi a korpuszt és az indexet. Az index újraépítése nulláról:
 
 ```bash
-docker compose run --rm --no-deps app agentic-rag ingest
+docker compose run --rm --no-deps app agentic-rag ingest --rebuild
 ```
 
 **Teljes stack:**
@@ -263,7 +263,7 @@ docker compose run --rm --no-deps app agentic-rag ingest
 docker compose up --build
 ```
 
-Az első indítás felépíti a képfájlt (néhány perc), és letölti az Ollama képfájlját és a chatmodellt (több GB); a UI a modell letöltése után indul. Az embedding modell az első használatkor töltődik le a `hf-cache` volume-ba, például az `ingest` parancs futásakor. A későbbi indítások újrahasznosítják a volume-okat.
+Az első indítás felépíti a képfájlt (meleg cache-sel kb. egy perc, nélküle több perc), letölti az Ollama képfájlját és a chatmodellt (több GB), majd az alkalmazás letölti a korpuszt (kb. 20 s) és az embedding modellt, és CPU-n beágyazza a 18 654 chunkot (kb. 6 perc, az embedding modell letöltésével együtt), mielőtt a UI elindul. A fejlesztői gépen mérve: 25 perc a `docker compose up --build` parancstól az egészséges alkalmazásig, ennek nagy része a letöltés (19 perc az Ollama képfájl és a modell, kb. 7 MB/s-mal). Közben az alkalmazás konténere `health: starting` állapotot mutat; a `docker compose logs -f app` követi a haladást. A későbbi indítások újrahasznosítják a volume-okat: a UI 11 s múlva válaszol a `docker compose up` után.
 
 **Fake mód** (csak az `app` szolgáltatás, Ollama és modell-letöltés nélkül):
 
@@ -275,7 +275,7 @@ LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps ap
 $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --build --no-deps app
 ```
 
-A `--no-deps` kihagyja a két Ollama szolgáltatást. PowerShellben a változók a munkamenet végéig beállítva maradnak; a `.env` fájlban is megadhatók.
+A `--no-deps` kihagyja a két Ollama szolgáltatást. A korpusz ekkor is letöltődik, a fake embeddingek indexe pedig kb. 20 s alatt elkészül, így a UI az első indítás után kb. 45 s-mal válaszol. PowerShellben a változók a munkamenet végéig beállítva maradnak; a `.env` fájlban is megadhatók.
 
 **NVIDIA GPU az Ollamához** (opcionális override fájl):
 
@@ -283,7 +283,7 @@ A `--no-deps` kihagyja a két Ollama szolgáltatást. PowerShellben a változók
 docker compose -f compose.yaml -f compose.gpu.yaml up --build
 ```
 
-NVIDIA driver és Docker GPU-támogatás kell hozzá: Windowson Docker Desktop WSL 2 backenddel, Linuxon az NVIDIA Container Toolkit. Alapértelmezetté a `.env` fájlban megadott `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` beállítással tehető (Windowson `;` az elválasztó). Az override nélkül az Ollama CPU-n fut.
+NVIDIA driver és Docker GPU-támogatás kell hozzá: Windowson Docker Desktop WSL 2 backenddel, Linuxon az NVIDIA Container Toolkit. Alapértelmezetté a `.env` fájlban megadott `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` beállítással tehető (Windowson `;` az elválasztó). Az override nélkül az Ollama CPU-n fut. Az alapértelmezett modellel mérve: CPU-n 20–60 s egy válasz, egy RTX 5070 Laptop GPU-n melegen 3–10 s (az első válasz a modelleket is betölti, kb. 45 s).
 
 **A gépen futó Ollama** az `ollama` szolgáltatás helyett:
 
@@ -297,7 +297,7 @@ docker compose run --rm --no-deps --service-ports -e OLLAMA_BASE_URL=http://host
 docker compose run --rm --no-deps app agentic-rag config
 ```
 
-Az `eval` és a `loadtest` a gépen futtatandó (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); ez az ajánlott út. A stack csak a `data/raw` mappát csatolja, ezért a konténerben futtatásukhoz egy további `./data/eval:/app/data/eval` bind mount kell, és a riportok csak akkor íródnak ki, ha a konténer felhasználója írhatja a `data/eval/results` mappát.
+Az `eval` és a `loadtest` a gépen futtatandó (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); ez az ajánlott út. A stack egyetlen könyvtárat sem csatol a gépről, ezért a konténerben futtatásukhoz egy `./data/eval:/app/data/eval` bind mount kell, és a riportok csak akkor íródnak ki, ha a konténer felhasználója írhatja a `data/eval/results` mappát.
 
 **Linuxos gépek és a 10001-es UID.** Az `app` konténer 10001-es UID-dal és GID-dal fut. A bind mount megtartja a gépen lévő könyvtár tulajdonosát, ezért Linuxos Docker Engine-en az alkalmazás csak akkor írhat egy bind mountba, ha a könyvtár a 10001-es UID számára írható; a Windowsos és macOS-es Docker Desktop ezt elfedi, mert a bind mountokat mindenki számára írhatónak mutatja. Vagy írhatóvá kell tenni a könyvtárat a 10001-es UID számára, vagy a saját azonosítóinkkal kell felépíteni a képfájlt az `APP_UID` és `APP_GID` build argumentumokkal:
 
@@ -305,18 +305,18 @@ Az `eval` és a `loadtest` a gépen futtatandó (`uv run agentic-rag eval`, `uv 
 APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
 ```
 
-A nevesített volume-ok (`chroma-data`, `hf-cache`) csak addig veszik át a tulajdonosukat a képfájlból, amíg üresek. Az azonosítók módosítása után ezért vagy helyben kell átállítani a tulajdonosukat (a parancs a [`compose.yaml`](compose.yaml) `app` szolgáltatásánál, a megjegyzésben található), vagy újra kell létrehozni őket a `docker compose down -v` paranccsal, amely az indexet és a letöltött modelleket is törli.
+A nevesített volume-ok (`corpus-data`, `chroma-data`, `hf-cache`) csak addig veszik át a tulajdonosukat a képfájlból, amíg üresek. Az azonosítók módosítása után ezért vagy helyben kell átállítani a tulajdonosukat (a parancs a [`compose.yaml`](compose.yaml) `app` szolgáltatásánál, a megjegyzésben található), vagy újra kell létrehozni őket a `docker compose down -v` paranccsal, amely a korpuszt, az indexet és a letöltött modelleket is törli.
 
 **A képfájl önmagában** (a kötelező `Dockerfile`, Compose nélkül):
 
 ```bash
 docker build -t agentic-rag-chatbot:dev .
-docker run --rm -p 127.0.0.1:8501:8501 --mount type=bind,source=./data/raw,target=/app/data/raw,readonly -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
+docker run --rm -p 127.0.0.1:8501:8501 -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
 ```
 
-A `--mount` alak változatlanul jut el a Dockerhez Git Bashből, PowerShellből és POSIX shellekből is; a Git Bash a rövid `-v ./data/raw:/app/data/raw:ro` alakot Windows-útvonallá írná át, és a korpusz rossz helyre, írhatóan kerülne. Sima `docker build` esetén más azonosítókhoz a `--build-arg APP_UID=... --build-arg APP_GID=...` kapcsolók adhatók meg.
+Minden új konténer újra letölti a korpuszt és felépíti az indexet (fake módban kb. 45 s). A megőrzésükhöz két volume adható hozzá: `--mount type=volume,source=agentic-rag-corpus,target=/app/data/raw --mount type=volume,source=agentic-rag-index,target=/app/data/chroma_db`. A `docker stop` azonnal leállítja a konténert, a tudásbázis előkészítése közben is. Sima `docker build` esetén más azonosítókhoz a `--build-arg APP_UID=... --build-arg APP_GID=...` kapcsolók adhatók meg.
 
-**A képfájl rétegei.** A `Dockerfile` két lépcsős. A `deps` lépcső csak az `uv.lock`-ban rögzített függőségeket telepíti (`uv sync --locked --no-dev --no-install-project`); a `--locked` leállítja a buildet, ha az `uv.lock` nem egyezik a `pyproject.toml`-lal. A futtató lépcső két, a kódtól független rétegben átmásolja ezt a virtuális környezetet (1,71 GB), és lefordítja a bytecode-ját (415 MB), majd hozzáadja az `src/` mappát (348 kB) és a projekt kis, szerkeszthető (editable) telepítését (115 kB). Az `src/` módosítása ezért csak a két kis réteget építi újra: mérve 7 s, szemben a szétválasztás előtti kb. 53 s-mal és egy új, 2,11 GB-os réteggel. A képfájl 2,88 GB (`python:3.12.14-slim-trixie`, csak CPU-s torch); nincs benne uv, buildfájl és fejlesztői függőség, a kód és a függőségek pedig root tulajdonúak, az alkalmazás felhasználója számára csak olvashatók.
+**A képfájl rétegei.** A `Dockerfile` két lépcsős. A `deps` lépcső csak az `uv.lock`-ban rögzített függőségeket telepíti (`uv sync --locked --no-dev --no-install-project`); a `--locked` leállítja a buildet, ha az `uv.lock` nem egyezik a `pyproject.toml`-lal. A futtató lépcső két, a kódtól független rétegben átmásolja ezt a virtuális környezetet (1,71 GB), és lefordítja a bytecode-ját (415 MB), majd hozzáadja az `src/` mappát (348 kB) és a projekt kis, szerkeszthető (editable) telepítését (115 kB). Az `src/` módosítása ezért csak a két kis réteget építi újra: mérve 7 s, szemben a szétválasztás előtti kb. 53 s-mal és egy új, 2,11 GB-os réteggel. A képfájl 3,02 GB (`python:3.12.14-slim-trixie`, csak CPU-s torch, valamint a korpusz letöltéséhez git, 105 MB); nincs benne uv, buildfájl és fejlesztői függőség, a kód és a függőségek pedig root tulajdonúak, az alkalmazás felhasználója számára csak olvashatók.
 
 **Leállítás és takarítás:**
 
@@ -325,11 +325,11 @@ docker compose down      # törli a konténereket és a hálózatot, a volume-ok
 docker compose down -v   # a volume-okat is törli
 ```
 
-> **Figyelem:** a `docker compose down -v` törli a letöltött modelleket (`ollama-data`, `hf-cache`) és a vektorindexet (`chroma-data`); a következő indítás újra letölti, illetve felépíti őket.
+> **Figyelem:** a `docker compose down -v` törli a letöltött modelleket (`ollama-data`, `hf-cache`), a korpuszt (`corpus-data`) és a vektorindexet (`chroma-data`); a következő indítás újra letölti, illetve felépíti őket.
 
 További lehetőségek, például az Ollama API publikálása a gépre egy helyi `compose.override.yaml` fájllal, a [`compose.yaml`](compose.yaml) fejlécében olvashatók.
 
-> Eddig ellenőrizve: a képfájl buildje (beállított `APP_UID`/`APP_GID` értékkel is, valamint a `--locked` hibája elavult lock fájl esetén), a rétegek újrahasznosítása az `src/` módosítása után, mindkét Compose konfiguráció, az `app` szolgáltatás fake módban (healthy állapot, a UI a 8501-es porton), a `docker run --mount` parancs Git Bashből, egy 1000-es UID tulajdonában lévő, szimulált linuxos bind mount, valamint az `ingest` a konténerben (fake embeddinggel, ideiglenes indexkönyvtárral): az alkalmazás felhasználójaként olvassa a csak olvasható korpuszt, és ugyanazt a 18 654 chunkot állítja elő, mint Windowson. Még nem futott: a konténeres `ingest` a Hugging Face modellel a `chroma-data` volume-ba, a teljes stack az Ollama szolgáltatásokkal (modell-letöltés, GPU-átadás), natív Linux gép és macOS. Git Bashből a `docker compose run -e NAME=/útvonal` alakhoz `MSYS_NO_PATHCONV=1` kell, különben a Git Bash az útvonalat Windows-útvonallá írja át.
+> Ellenőrizve: a képfájl buildje (beállított `APP_UID`/`APP_GID` értékkel is, valamint a `--locked` hibája elavult lock fájl esetén), a rétegek újrahasznosítása az `src/` módosítása után, a `docker build .` önmagában, mindkét Compose konfiguráció, egy 1000-es UID tulajdonában lévő, szimulált linuxos bind mount, valamint Windowson, Docker Desktoppal: a teljes stack friss klónból (25 perc után egészséges, utána valódi válaszok a konténerből), egy újraindítás, a fake mód `--no-deps` kapcsolóval és egy sima `docker run` (a korpusz letöltése és az index felépítése induláskor, a UI válaszol), a `docker stop` a tudásbázis előkészítése közben (azonnal leáll, 130-as kilépési kóddal), valamint a GPU-s override (mind a 29 réteg egy NVIDIA RTX 5070 Laptop GPU-n). Még nem futott: natív Linux gép és macOS. Git Bashből a `docker compose run -e NAME=/útvonal` alakhoz `MSYS_NO_PATHCONV=1` kell, különben a Git Bash az útvonalat Windows-útvonallá írja át.
 
 ### Konfiguráció
 
@@ -357,7 +357,7 @@ A valódi környezeti változók elsőbbséget élveznek a `.env`-del szemben, a
 | `TOP_K` | `4` | Lekérdezésenként visszakeresett chunkok száma |
 | `GRADE_WITH_LLM` | `true` | A chatmodell kiszűri azokat a visszakeresett chunkokat, amelyek nem segítenek a válaszban (visszakeresésenként egy extra LLM-hívás; fake módban nincs hatása) |
 | `MAX_RETRIES` | `2` | Az ellenőrzés → újratervezés ciklus korlátja |
-| `INGEST_ON_START` | `true` | Induláskor felépíti az indexet, ha hiányzik (a 6. fázisig nincs hatása) |
+| `INGEST_ON_START` | `true` | Induláskor (`agentic-rag serve`, a konténer parancsa) letölti a hiányzó korpuszforrásokat, és naprakészre hozza az indexet; a más embeddinggel épített indexet újraépíti |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` vagy `ERROR` |
 
 A Compose stackben a `compose.yaml` az `app` szolgáltatásnak az `OLLAMA_BASE_URL=http://ollama:11434` értéket adja, így a `.env`-ben megadott érték ezt nem változtatja meg; az `LLM_PROVIDER`, az `EMBEDDING_PROVIDER` és az `OLLAMA_MODEL` értékét pedig a shellből vagy a `.env`-ből veszi át. Minden más változó csak a `.env` fájlon keresztül jut be a konténerbe. A teljes referencia az érvényességi szabályokkal a [docs/architecture.md](docs/architecture.md#configuration-reference) fájlban található (angolul).
@@ -406,7 +406,7 @@ agentic-rag-chatbot-poc/
 │   └── agentic_rag/
 │       ├── __init__.py             # a csomag verziója
 │       ├── __main__.py             # `python -m agentic_rag`
-│       ├── cli.py                  # parancsok: ingest · eval · loadtest · export-graph · config
+│       ├── cli.py                  # parancsok: ingest · eval · loadtest · export-graph · config · serve
 │       ├── config.py               # Settings környezeti változókból és .env-ből; a naplózás beállítása
 │       ├── errors.py               # PlannedFeatureError, ConfigurationError, InvalidArgumentError, planned()
 │       ├── llm.py                  # chatmodell factory: Ollama vagy a szkriptelt fake
@@ -434,7 +434,8 @@ agentic-rag-chatbot-poc/
 │       │   ├── markdown.py         # front matter, a dialektusok tisztítása (MDN, MDX, VitePress, MDC), szakaszok
 │       │   ├── loaders.py          # korpuszfájlok → szakaszonként egy Document hivatkozási metaadatokkal
 │       │   ├── chunking.py         # szerkezetkövető chunkok kontextussorral (900/150, kód 1800-ig)
-│       │   └── index.py            # a Chroma index felépítése, frissítése és megnyitása; IndexStats
+│       │   ├── index.py            # a Chroma index felépítése, frissítése, megnyitása, ellenőrzése
+│       │   └── prepare.py          # indulási előkészítés: a hiányzók letöltése, az index frissítése
 │       ├── evaluation/
 │       │   ├── dataset.py          # EvalItem és a questions.jsonl betöltője
 │       │   ├── metrics.py          # hit@k és routing-pontosság; LLM-mel pontozott metrikák a 7. fázisban

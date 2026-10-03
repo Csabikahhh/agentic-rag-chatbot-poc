@@ -2,12 +2,14 @@
 # local LLM served by Ollama. The UI is published on http://localhost:8501 only.
 #
 # 1) Full stack. The first start pulls the chat model (several GB) into the
-#    ollama-data volume; the embedding model is downloaded into hf-cache on
-#    first use:
+#    ollama-data volume; then the app downloads the corpus into corpus-data,
+#    the embedding model into hf-cache, and builds the index in chroma-data
+#    (minutes on the CPU) before the UI starts. Later starts reuse the volumes:
 #      docker compose up --build
 #
 # 2) Model-free fake mode: scripted LLM and offline fake embeddings, no Ollama
-#    container, no model downloads:
+#    container, no model downloads (the corpus is still downloaded, and the
+#    fake-embedding index is built in seconds):
 #      LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps app
 #    PowerShell:
 #      $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --build --no-deps app
@@ -26,7 +28,10 @@
 #       ollama:
 #         ports:
 #           - "127.0.0.1:11435:11434"
-# - Remove the containers and all downloaded models and indexes:
+# - Rebuild the index from scratch, e.g. after changing EMBEDDING_MODEL (a
+#   start-up does that by itself) or to start over:
+#     docker compose run --rm --no-deps app agentic-rag ingest --rebuild
+# - Remove the containers, the corpus and all downloaded models and indexes:
 #     docker compose down -v
 #
 # Portions adapted from the asset compose-dev.yaml of the
@@ -77,11 +82,11 @@ services:
       # writable bind mount (such as ./data/eval) build with your own IDs:
       #   APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
       # Named volumes take their owner from the image only while they are
-      # empty: once chroma-data and hf-cache hold data, they keep the old IDs
-      # after an ID change. docker compose down -v resets them, but also deletes
-      # the index and all downloaded models (ollama-data too). To keep them,
-      # change the owner in place:
-      #   docker compose run --rm --no-deps --user root app chown -R "$(id -u):$(id -g)" /app/data/chroma_db /home/app/.cache/huggingface
+      # empty: once corpus-data, chroma-data and hf-cache hold data, they keep
+      # the old IDs after an ID change. docker compose down -v resets them, but
+      # also deletes the corpus, the index and all downloaded models (ollama-data
+      # too). To keep them, change the owner in place:
+      #   docker compose run --rm --no-deps --user root app chown -R "$(id -u):$(id -g)" /app/data/raw /app/data/chroma_db /home/app/.cache/huggingface
       args:
         APP_UID: "${APP_UID:-10001}"
         APP_GID: "${APP_GID:-10001}"
@@ -95,11 +100,16 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-huggingface}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
       OLLAMA_BASE_URL: http://ollama:11434
+      # The container's paths are the volumes below, whatever .env sets for the
+      # host. One index directory per embedding provider, so switching between
+      # the full stack and fake mode does not rebuild the index every time.
+      DATA_DIR: /app/data/raw
+      CHROMA_DIR: /app/data/chroma_db/${EMBEDDING_PROVIDER:-huggingface}
     volumes:
-      # Corpus from the repository, read-only.
-      - ./data/raw:/app/data/raw:ro
-      # Chroma index and Hugging Face model cache survive container rebuilds.
+      # Corpus, Chroma index and Hugging Face model cache survive container
+      # rebuilds. The app downloads the corpus at start-up (INGEST_ON_START).
       # Paths match the Dockerfile (WORKDIR /app, HF_HOME).
+      - corpus-data:/app/data/raw
       - chroma-data:/app/data/chroma_db
       - hf-cache:/home/app/.cache/huggingface
     extra_hosts:
@@ -116,5 +126,6 @@ services:
 
 volumes:
   ollama-data:
+  corpus-data:
   chroma-data:
   hf-cache:

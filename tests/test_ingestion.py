@@ -22,7 +22,7 @@ from agentic_rag.agent.compat import BCD_DIRECTORY
 from agentic_rag.config import Settings
 from agentic_rag.embeddings import HashingEmbeddings
 from agentic_rag.errors import ConfigurationError
-from agentic_rag.ingestion import download, index
+from agentic_rag.ingestion import download, index, prepare
 from agentic_rag.ingestion.chunking import (
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
@@ -33,12 +33,18 @@ from agentic_rag.ingestion.chunking import (
     context_line,
     split_documents,
 )
-from agentic_rag.ingestion.download import DownloadError, download_sources
+from agentic_rag.ingestion.download import (
+    DownloadError,
+    DownloadStats,
+    SourceDownload,
+    download_sources,
+)
 from agentic_rag.ingestion.index import (
     EmbeddingMismatchError,
     IndexNotFoundError,
     IndexStats,
     build_index,
+    index_state,
     load_index,
 )
 from agentic_rag.ingestion.loaders import (
@@ -48,7 +54,9 @@ from agentic_rag.ingestion.loaders import (
     load_file,
 )
 from agentic_rag.ingestion.markdown import parse_markdown, split_front_matter
+from agentic_rag.ingestion.prepare import prepare_knowledge_base
 from agentic_rag.ingestion.sources import (
+    DEFAULT_SOURCES_FILE,
     MANIFEST_NAME,
     CorpusSource,
     SourceManifest,
@@ -1023,6 +1031,106 @@ def test_load_index_does_not_create_a_missing_index(settings: Settings) -> None:
     build_index(settings)
     with pytest.raises(IndexNotFoundError):
         load_index(other_embeddings(settings, chroma_collection="another"))
+
+
+def test_index_state_tells_missing_ready_and_mismatched_indexes(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_model(settings: Settings) -> Embeddings:
+        raise AssertionError("the embedding model was loaded")
+
+    assert index_state(settings) == "missing"  # No index directory yet.
+    frontend_corpus(settings.data_dir)
+    build_index(settings)
+    index._client(settings.chroma_dir).create_collection("empty")
+    monkeypatch.setattr(index, "get_embeddings", no_model)
+
+    assert index_state(settings) == "ready"
+    assert index_state(other_embeddings(settings, chroma_collection="another")) == "missing"
+    assert index_state(other_embeddings(settings, chroma_collection="empty")) == "missing"
+    huggingface = other_embeddings(settings, embedding_provider="huggingface")
+    assert index_state(huggingface) == "mismatch"
+
+
+# --- start-up preparation ------------------------------------------------------------------
+
+
+def stand_in_download(monkeypatch: pytest.MonkeyPatch, *, changed: bool) -> list[Path]:
+    """Replace the corpus download of the preparation; return the source lists it was given.
+
+    The stand-in reports one source, downloaded (``changed``) or skipped as up to date.
+    """
+    calls: list[Path] = []
+
+    def download_sources(settings: Settings, *, sources_file: Path) -> DownloadStats:
+        calls.append(sources_file)
+        source = SourceDownload(id="react", commit="a" * 40, files=1, skipped=not changed)
+        return DownloadStats(sources=(source,), duration_ms=1.0)
+
+    monkeypatch.setattr(prepare, "download_sources", download_sources)
+    return calls
+
+
+def test_prepare_knowledge_base_downloads_the_corpus_then_builds_a_missing_index(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    calls = stand_in_download(monkeypatch, changed=True)
+    frontend_corpus(settings.data_dir)  # What the download would have put there.
+    caplog.set_level("INFO", logger=prepare.__name__)
+
+    stats = prepare_knowledge_base(settings)
+
+    assert calls == [DEFAULT_SOURCES_FILE]
+    assert (stats.chunks > 0, stats.rebuilt) == (True, False)
+    assert index_state(settings) == "ready"
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Downloaded the corpus sources react" in messages
+    assert any(message.startswith("Building the vector index") for message in messages)
+
+
+def test_prepare_knowledge_base_embeds_nothing_for_an_unchanged_corpus(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, counting_embeddings: list[int]
+) -> None:
+    stand_in_download(monkeypatch, changed=False)
+    frontend_corpus(settings.data_dir)
+    first = build_index(settings)
+    embedded = list(counting_embeddings)
+
+    stats = prepare_knowledge_base(settings)
+
+    assert counting_embeddings == embedded  # A later start embeds nothing.
+    assert (stats.chunks, stats.rebuilt) == (first.chunks, False)
+
+
+def test_prepare_knowledge_base_rebuilds_an_index_of_other_embeddings(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    stand_in_download(monkeypatch, changed=False)
+    builds: list[bool] = []
+
+    def build_index(settings: Settings, *, rebuild: bool) -> str:
+        builds.append(rebuild)
+        return "stats"
+
+    monkeypatch.setattr(prepare, "build_index", build_index)
+    monkeypatch.setattr(prepare, "index_state", lambda settings: "mismatch")
+
+    assert prepare_knowledge_base(settings) == "stats"
+    assert builds == [True]
+    assert any("built with other embeddings" in record.getMessage() for record in caplog.records)
+
+
+def test_prepare_knowledge_base_lets_a_failed_download_propagate(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def download_sources(settings: Settings, *, sources_file: Path) -> DownloadStats:
+        raise DownloadError("git fetch failed")
+
+    monkeypatch.setattr(prepare, "download_sources", download_sources)
+
+    with pytest.raises(DownloadError, match="git fetch failed"):
+        prepare_knowledge_base(settings)
+    assert not settings.chroma_dir.exists()
 
 
 # --- data contracts ------------------------------------------------------------------------

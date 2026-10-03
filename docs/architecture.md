@@ -188,7 +188,7 @@ The subgraph is compiled as `StateGraph(RagState, input_schema=RagInput, output_
 
 ## Ingestion and index
 
-`agentic_rag.ingestion` (Phase 2, implemented) downloads the corpus into `DATA_DIR`, cleans and splits it and stores the chunks in the Chroma collection `CHROMA_COLLECTION` in `CHROMA_DIR`. `agentic-rag ingest [--download]` runs the pipeline.
+`agentic_rag.ingestion` (Phase 2, implemented) downloads the corpus into `DATA_DIR`, cleans and splits it and stores the chunks in the Chroma collection `CHROMA_COLLECTION` in `CHROMA_DIR`. `agentic-rag ingest [--download]` runs the pipeline, and `agentic-rag serve`, the container's command, prepares it at start-up (see *Start-up preparation* below).
 
 ```mermaid
 flowchart LR
@@ -202,12 +202,13 @@ flowchart LR
 
 *Hand-drawn; the pipeline is plain functions, not a graph.*
 
-- **Sources and download.** `data/sources.toml` lists the sources (`sources.CorpusSource`): a git repository, a pinned commit, a root directory, `include` and `exclude` glob patterns, the license, a short name and a URL template. `download.download_sources` fetches each source with a shallow, blob-less fetch of the one commit and a cone-mode sparse checkout of the directories the patterns can match, copies the selected files into `DATA_DIR/<id>/` through a staging directory, and writes the source there as `.source.json` (the manifest). A source whose manifest matches is skipped. A failed source keeps its previous directory and raises `DownloadError`; an invalid source list raises `ConfigurationError`. The download needs git and writes to `DATA_DIR`, so it runs on the host.
+- **Sources and download.** `data/sources.toml` lists the sources (`sources.CorpusSource`): a git repository, a pinned commit, a root directory, `include` and `exclude` glob patterns, the license, a short name and a URL template. `download.download_sources` fetches each source with a shallow, blob-less fetch of the one commit and a cone-mode sparse checkout of the directories the patterns can match, copies the selected files into `DATA_DIR/<id>/` through a staging directory, and writes the source there as `.source.json` (the manifest). A source whose manifest matches is skipped. A failed source keeps its previous directory and raises `DownloadError`; an invalid source list raises `ConfigurationError`. The download needs git and network access and writes to `DATA_DIR`: on the host through `ingest --download`, in the container at start-up, into the `corpus-data` volume.
 - **Documents.** `loaders.load_documents` reads every Markdown, MDX and text file of the corpus (README files and dotfiles excluded; any other file stops the run with a `ValueError`). `markdown.parse_markdown` removes the front matter and cleans the dialect of each documentation set (MDN macros, JSX components, VitePress containers, MDC components, HTML tags outside code; code blocks verbatim) and splits the page at its H2 and H3 headings. Each section with text becomes one document with `DocumentMetadata`: `source` (the path relative to `DATA_DIR` with forward slashes), `title`, `section` (the headings joined with ` > `) and, from the manifest, `url`; the source's name is added to the title (`useState – React`). `page` stays in the contract for paged formats, which this corpus does not have. Chroma accepts only `str`, `int`, `float` and `bool` metadata values (or lists of them), so unknown values are left out instead of being stored as `None`.
 - **Chunks.** `chunking.split_documents` divides a section into paragraphs, heading lines and code blocks and packs them into chunks of up to `chunk_size` (900) characters; a code block stays whole up to `code_block_limit` (1 800), a heading moves to the chunk of the text it introduces, and only longer blocks are split by `RecursiveCharacterTextSplitter`. Every chunk starts with a context line, `title > section`, followed by a verbatim slice of the section; `start_index` is the slice's offset in the section. `chunk_id` is a hash of the metadata, the position and the text, so an unchanged file gives the same ids and an edit gives new ids to the chunks it changes or shifts.
 - **Reconciliation.** `build_index(settings, *, rebuild=False)` leaves the collection with exactly the chunks of the current corpus. It embeds and upserts only the produced chunks whose id the collection does not hold yet (a stored id already holds that very chunk), and once that has succeeded it deletes every stored id the run did not produce (the set difference). Both steps send batches of 256 chunks. This handles added, edited, shortened, re-chunked and removed files; a run that fails never removes chunks, an unchanged corpus embeds nothing and does not even load the embedding model, so `agentic-rag ingest` is idempotent and cheap to repeat. A corpus without documents raises `FileNotFoundError` instead of emptying the index. `IndexStats.chunks` is the number of chunks the run produced, which is also the size of the collection afterwards.
 - **Rebuild.** `agentic-rag ingest --rebuild` deletes the collection first. It is needed only after changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`: the collection records both, and a plain run or `load_index` with another provider, or another model of the `huggingface` provider, raises `EmbeddingMismatchError` (a `ConfigurationError`) before any model is loaded.
 - **Opening the index.** `load_index(settings)` opens the existing collection without creating it (`IndexNotFoundError` when it or `CHROMA_DIR` is missing). The collection uses cosine distance, so `similarity_search_with_relevance_scores` returns `1 - distance`, higher for more relevant chunks. Apart from the embedding model nothing is loaded up front; the RAG subgraph calls it once per compiled graph, on its first query.
+- **Start-up preparation.** `agentic-rag serve` runs `prepare.prepare_knowledge_base(settings)` before it starts Streamlit when `INGEST_ON_START` is on (the default). It downloads the sources that `DATA_DIR` does not hold at their pinned commits (up-to-date ones are skipped without network access), then calls `build_index`: a missing index is built, a ready one is reconciled (an unchanged corpus embeds nothing), and one built with other embeddings, which `index_state(settings)` reports from the collection's metadata without loading a model, is rebuilt. A failure the user can fix (`DownloadError`, no corpus, an invalid source list) is logged and the UI starts anyway; the chat then explains the missing index. While it runs, SIGTERM interrupts it, so `docker stop` does not wait for the stop timeout; afterwards `serve` replaces its process with Streamlit (`os.execv`; a child process on Windows), which becomes the container's main process.
 
 ## Tools
 
@@ -426,7 +427,9 @@ CLI exit codes (`agentic_rag.cli`):
 | 0 | Success | The command's output |
 | 1 | The command failed | A `PlannedFeatureError` prints only its message, and so do a missing corpus (`FileNotFoundError`) and a `DownloadError` of `ingest`. Any other exception propagates with its traceback, a plain `NotImplementedError` and a `ValidationError` raised inside a command included |
 | 2 | Usage or configuration error | No traceback: an argparse error, an `InvalidArgumentError` from the command (reported like a usage error of the subcommand, for example `eval --target node --node verify_answer`), invalid settings (named by variable) or a `ConfigurationError` |
-| 130 | Interrupted | `Interrupted.` |
+| 130 | Interrupted | `Interrupted.` (also when `serve` receives SIGTERM during the start-up preparation) |
+
+`serve` returns the exit code of Streamlit on Windows; on POSIX it replaces its process with Streamlit and does not return. A start-up preparation that fails for a reason the user can fix is logged, not an exit code (see [Ingestion and index](#ingestion-and-index)).
 
 The Streamlit UI:
 
@@ -463,7 +466,7 @@ The Streamlit UI:
 | `TOP_K` | Integer ≥ 1 | `4` | Chunks retrieved per query; also the k of hit@k | `rag`, `evaluation` (Phase 7) |
 | `GRADE_WITH_LLM` | `true`, `false` | `true` | Let the chat model drop the retrieved chunks that do not help answer the query: one extra LLM call per retrieval. No effect with the `fake` LLM provider | `rag.graph` |
 | `MAX_RETRIES` | Integer ≥ 0 | `2` | Bound on the verify → re-plan loop; 0 disables re-planning | `agent.graph` |
-| `INGEST_ON_START` | `true`, `false` | `true` | Build the index at start-up when it is missing | Nothing yet: the container entrypoint (Phase 6) |
+| `INGEST_ON_START` | `true`, `false` | `true` | At start-up, download the missing corpus sources and bring the index up to date: build it when it is missing, rebuild it when it was built with other embeddings | `agentic-rag serve`, the container's command |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR` | `INFO` | Log level of the CLI and the UI | `config.configure_logging` |
 
 Changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL` requires rebuilding the index (`agentic-rag ingest --rebuild`), because vectors of different models are not comparable.
@@ -478,18 +481,18 @@ Variables outside `Settings`:
 | `OLLAMA_HOST` | `compose.yaml` (`ollama-pull`) | Points the one-shot model pull at the `ollama` service |
 | `COMPOSE_FILE` | `.env`, read by Docker Compose | Optional: `compose.yaml:compose.gpu.yaml` (`;` as the separator on Windows) makes the GPU override the default |
 
-In the Compose stack, the `app` service receives `LLM_PROVIDER`, `EMBEDDING_PROVIDER` and `OLLAMA_MODEL` from the shell or `.env` (with the `Settings` defaults as fallbacks), a fixed `OLLAMA_BASE_URL=http://ollama:11434`, and every other variable only from `.env`.
+In the Compose stack, the `app` service receives `LLM_PROVIDER`, `EMBEDDING_PROVIDER` and `OLLAMA_MODEL` from the shell or `.env` (with the `Settings` defaults as fallbacks); fixed values for `OLLAMA_BASE_URL` (`http://ollama:11434`), `DATA_DIR` (`/app/data/raw`, the `corpus-data` volume) and `CHROMA_DIR` (`/app/data/chroma_db/<EMBEDDING_PROVIDER>` in the `chroma-data` volume, one index per provider, so switching between the full stack and fake mode does not rebuild it); and every other variable only from `.env`.
 
 ## Implementation status
 
 | Area | Implemented | Skeleton, planned for |
 |---|---|---|
-| Settings, errors and CLI | `config` (with `describe_invalid_settings`), `errors`, `cli`, `__main__` | None |
+| Settings, errors and CLI | `config` (with `describe_invalid_settings`), `errors`, `cli` (with `serve`, the container's command), `__main__` | None |
 | Chat model | `get_chat_model` (with `num_ctx` and the request timeout), `ScriptedChatModel` (ordered regex rules, optionally expanding their groups, JSON structured output, sync only), `DEFAULT_FAKE_RULES` for the real prompts | None |
 | Embeddings | `get_embeddings`, `HashingEmbeddings`, the E5 prefix detection | None |
 | Step traces | `TraceEvent` (with the LangGraph step), `traced`, `trace_events_from_chunk`, `epoch_now` | None |
 | State contracts | `AgentState`, `RagState`, their records and the literal types in `agent.types` | None |
-| Ingestion | The source list and the download (`sources`, `download`), the Markdown cleaning (`markdown`), the loaders, the chunking, `build_index` and `load_index`, with their data contracts | None |
+| Ingestion | The source list and the download (`sources`, `download`), the Markdown cleaning (`markdown`), the loaders, the chunking, `build_index`, `load_index` and `index_state`, the start-up preparation (`prepare`), with their data contracts | None |
 | RAG subgraph | The four nodes with their prompts, `MIN_SCORES` and `build_rag_graph` with the lazy, lock-guarded index provider | None |
 | Main workflow | The seven nodes with their prompts, the three routing functions, the four tools and `build_agent_graph` | None |
 | UI | The chat page with stop handling, example questions and explained failures; the step panel, grouped by LangGraph step, with the RAG subgraph's steps under each search; the retrieved-context panel; the settings summary. Checked against the real main graph | None |

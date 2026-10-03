@@ -11,6 +11,9 @@ the container):
   the container (``INGEST_ON_START``).
 - :func:`load_index` opens the existing collection for the ``retrieve`` node of the RAG
   subgraph.
+- :func:`index_state` tells, without loading the embedding model, whether the collection is
+  missing, ready for the current embedding settings, or built with other ones; the start-up
+  preparation (``agentic_rag.ingestion.prepare``) rebuilds it in the last case.
 
 Both functions take the embedding model from ``agentic_rag.embeddings.get_embeddings``, so the
 same settings embed the passages and the queries with the same model. The collection records
@@ -28,7 +31,7 @@ import logging
 import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
@@ -49,10 +52,16 @@ __all__ = [
     "EMBEDDING_BATCH_SIZE",
     "EmbeddingMismatchError",
     "IndexNotFoundError",
+    "IndexState",
     "IndexStats",
     "build_index",
+    "index_state",
     "load_index",
 ]
+
+type IndexState = Literal["missing", "ready", "mismatch"]
+"""What :func:`index_state` finds: no collection (or an empty one), a collection built with
+the current embedding settings, or one built with other embeddings."""
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +251,36 @@ def load_index(settings: Settings) -> VectorStore:
         collection_configuration=COLLECTION_CONFIGURATION,  # type: ignore[arg-type]
         create_collection_if_not_exists=False,
     )
+
+
+def index_state(settings: Settings) -> IndexState:
+    """Tell whether the vector index exists and matches the embedding settings.
+
+    Reads only the collection's metadata and size: the embedding model is not loaded.
+
+    Args:
+        settings: ``chroma_dir`` and ``chroma_collection`` locate the index;
+            ``embedding_provider`` and ``embedding_model`` are compared with the ones the
+            collection was built with.
+
+    Returns:
+        ``"missing"`` when the directory or the collection does not exist or the collection
+        is empty, ``"mismatch"`` when it was built with another embedding provider or model,
+        ``"ready"`` otherwise.
+    """
+    if not settings.chroma_dir.is_dir():
+        return "missing"
+    client = _client(settings.chroma_dir)
+    if settings.chroma_collection not in _collection_names(client):
+        return "missing"
+    collection = client.get_collection(settings.chroma_collection)
+    if collection.count() == 0:
+        return "missing"
+    try:
+        _check_embeddings(collection, settings)
+    except EmbeddingMismatchError:
+        return "mismatch"
+    return "ready"
 
 
 def _client(chroma_dir: Path) -> "ClientAPI":

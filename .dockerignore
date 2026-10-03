@@ -3,9 +3,10 @@
 # Allowlist: everything is excluded first and only the build inputs are
 # re-included, so new files (secrets, models, local data) stay out of the
 # context by default. This excludes, among others: .git, .github, .venv,
-# .claude/, task/, tests/, docs/, data/ (the corpus is bind-mounted at run time
-# and the Chroma index lives in a named volume, see compose.yaml), IDE folders,
-# .env files, .streamlit/ and the Docker files themselves.
+# .claude/, task/, tests/, docs/, data/ except the source list (the container
+# downloads the corpus and builds the index into named volumes, see
+# compose.yaml), IDE folders, .env files, .streamlit/ and the Docker files
+# themselves.
 #
 # Adapted from the asset dockerignore-example of the docker-project-foundations
 # skill (https://github.com/docker/skills), licensed under the Apache License,
@@ -22,6 +23,8 @@
 !README.md
 !LICENSE
 !src/
+# The source list of the corpus download, read at start-up.
+!data/sources.toml
 
 # Never send these, even from inside a re-included path such as src/.
 

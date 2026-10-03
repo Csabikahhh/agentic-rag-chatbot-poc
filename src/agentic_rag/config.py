@@ -167,7 +167,9 @@ class Settings(BaseSettings):
     )
     ingest_on_start: bool = Field(
         default=True,
-        description="Build the vector index at start-up when it is missing.",
+        description="At start-up (agentic-rag serve, the container's command), download the "
+        "missing corpus sources and bring the vector index up to date: build it when it is "
+        "missing, rebuild it when it was built with other embeddings.",
     )
     log_level: LogLevel = Field(
         default="INFO",

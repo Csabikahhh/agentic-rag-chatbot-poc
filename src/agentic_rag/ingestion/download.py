@@ -13,8 +13,9 @@ For every :class:`~agentic_rag.ingestion.sources.CorpusSource` it:
    target, writes the manifest there and swaps it in place of ``DATA_DIR/<id>/``. Files that
    the new selection no longer contains disappear with the old directory.
 
-The download needs git (2.27 or newer) on the PATH and network access to the repositories. It
-writes to ``DATA_DIR``, so it runs on the host: the container mounts the corpus read-only.
+The download needs git (2.27 or newer) on the PATH and network access to the repositories. On
+the host it runs with ``agentic-rag ingest --download``; the container runs it at start-up
+(``agentic_rag.ingestion.prepare``), into the named volume that holds its ``DATA_DIR``.
 """
 
 import logging

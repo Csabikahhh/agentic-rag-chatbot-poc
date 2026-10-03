@@ -108,6 +108,7 @@ GROUPS = (
             "agentic_rag.ingestion.chunking",
             "agentic_rag.ingestion.index",
             "agentic_rag.ingestion.download",
+            "agentic_rag.ingestion.prepare",
             "agentic_rag.rag",
             "agentic_rag.rag.state",
             "agentic_rag.rag.nodes",

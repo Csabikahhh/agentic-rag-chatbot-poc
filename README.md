@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 5 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer. The evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 6 (the container entrypoint and the full-stack run), then the evaluation. Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 6 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; and `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own. The evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 7 (the functional evaluation), then the load test. Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -54,7 +54,7 @@ Status of each requirement from the brief:
 
 - [ ] Open-source LLM that fits the local resources (no paid APIs), with the trade-offs justified
 - [x] Streamlit prototype UI that shows the agent's main steps and the result of the RAG process
-- [ ] Containerized: `Dockerfile` (required) and `docker-compose.yml` (a plus for multi-component setups)
+- [x] Containerized: `Dockerfile` (required) and `docker-compose.yml` (a plus for multi-component setups)
 
 **Evaluation & performance**
 
@@ -171,8 +171,8 @@ Notes on the provisional defaults:
 - Git.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for local development; it also installs Python 3.12 when it is missing.
 - Docker with Docker Compose 2.24 or newer for the containers (`compose.yaml` uses the optional `env_file` syntax).
-- For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The provisional default model, `qwen2.5:7b-instruct` (4-bit, about 4.7 GB), fits in an 8 GB GPU and also runs on the CPU, more slowly (*exact RAM/VRAM requirements TBD*). Fake mode needs neither a model nor a GPU.
-- Disk space for the full stack: the application image (about 2.9 GB; 2.88 GB measured), the Ollama image and the chat model.
+- For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The provisional default model, `qwen2.5:7b-instruct` (4-bit, about 4.7 GB), fits in an 8 GB GPU and also runs on the CPU, more slowly. Measured in the Compose stack with the default `OLLAMA_NUM_CTX=8192`: on the CPU the `ollama` container used 7.7 GB of RAM and answered in 20–60 s; with the GPU override all layers fit in 8 GB of VRAM and warm answers took 3–10 s. Fake mode needs neither a model nor a GPU.
+- Disk space for the full stack: the application image (3.02 GB measured), the Ollama image (9.3 GB), the chat model (4.7 GB), the embedding model and the corpus with its index (about 640 MB together).
 
 ### What works today
 
@@ -185,7 +185,7 @@ The foundation and the knowledge base run end to end, but the chatbot does not a
 - `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
 - the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. Measured with Qwen2.5-7B-Instruct on a laptop GPU, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
 - the Streamlit UI streams the main workflow: the step panel shows each step as it finishes, groups the parallel ones by LangGraph step and lists under each search the steps of the RAG subgraph (the English search query, the retrieved and the kept chunks), and the retrieved-context panel shows the numbered sources with a link to each page. The empty chat offers one example question per route (a search, a comparison asked in Hungarian, one question per tool), which also work with the fake LLM. A missing index, an index built with other embeddings, an unreachable Ollama and a model that is not pulled are explained in the chat with the fix. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
-- the image builds, and the `app` service starts healthy in fake mode.
+- from a fresh clone, `docker compose up --build` pulls the chat model, downloads the corpus, builds the index and serves the UI with no other step (measured: 25 minutes for the first start on the development machine, 11 s for a restart); in fake mode a single container is ready in about 45 s.
 
 ### Local development with uv
 
@@ -228,7 +228,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `766 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `780 passed, 1 deselected` (measured on 2026-10-03; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -249,12 +249,12 @@ The brief asks for a `docker-compose.yml`; the repository provides it as `compos
 | `ollama` | `ollama/ollama:0.35.0` | Serves the LLM; reachable as `http://ollama:11434` inside the stack, not published on the host |
 | `ollama-pull` | `ollama/ollama:0.35.0` | One-shot: pulls `OLLAMA_MODEL` unless the `ollama-data` volume already has it |
 
-The corpus, `./data/raw`, is mounted read-only. The named volumes `ollama-data` (Ollama models), `chroma-data` (vector index) and `hf-cache` (Hugging Face models) keep the downloads and the index across rebuilds.
+The named volumes keep the downloads and the index across rebuilds: `ollama-data` (Ollama models), `corpus-data` (the corpus), `chroma-data` (the vector index, one directory per embedding provider, so switching between the full stack and fake mode does not rebuild it) and `hf-cache` (Hugging Face models). No host directory is mounted.
 
-**The knowledge base in the container.** The container cannot write the corpus, so download it on the host first (`uv run agentic-rag ingest --download`, which also builds a host index). The container keeps its own index in the `chroma-data` volume; until the Phase 6 entrypoint builds it at start-up (`INGEST_ON_START`), build it once with:
+**The knowledge base in the container.** The app's command, `agentic-rag serve`, prepares the knowledge base before it starts the UI (`INGEST_ON_START=true`, the default): it downloads the corpus sources that the `corpus-data` volume does not hold yet (with git, at the pinned commits of `data/sources.toml`), then builds the index or brings it up to date with the corpus; an index built with other embeddings is rebuilt. Nothing has to be prepared on the host, and a restart checks the corpus and the index in a few seconds. To rebuild the index from scratch:
 
 ```bash
-docker compose run --rm --no-deps app agentic-rag ingest
+docker compose run --rm --no-deps app agentic-rag ingest --rebuild
 ```
 
 **Full stack:**
@@ -263,7 +263,7 @@ docker compose run --rm --no-deps app agentic-rag ingest
 docker compose up --build
 ```
 
-The first start builds the image (a few minutes) and downloads the Ollama image and the chat model (several GB); the UI starts once the model pull has finished. The embedding model is downloaded into `hf-cache` the first time it is used, for example by `ingest`. Later starts reuse the volumes.
+The first start builds the image (about a minute with a warm cache, several minutes without), downloads the Ollama image and the chat model (several GB), then the app downloads the corpus (about 20 s) and the embedding model and embeds the 18 654 chunks on the CPU (about 6 minutes, the embedding model download included) before the UI starts. Measured on the development machine: 25 minutes from `docker compose up --build` to a healthy app, most of it the downloads (19 minutes for the Ollama image and the model at about 7 MB/s). Meanwhile the app container reports `health: starting`; `docker compose logs -f app` follows the progress. Later starts reuse the volumes: the UI answers 11 s after `docker compose up`.
 
 **Fake mode** (only the `app` service; no Ollama, no model downloads):
 
@@ -275,7 +275,7 @@ LLM_PROVIDER=fake EMBEDDING_PROVIDER=fake docker compose up --build --no-deps ap
 $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --build --no-deps app
 ```
 
-`--no-deps` leaves out the two Ollama services. In PowerShell the variables stay set for the rest of the session; setting them in `.env` works as well.
+`--no-deps` leaves out the two Ollama services. The corpus is still downloaded, and the index of the fake embeddings is built in about 20 s, so the UI answers about 45 s after the first start. In PowerShell the variables stay set for the rest of the session; setting them in `.env` works as well.
 
 **NVIDIA GPU for Ollama** (an optional override file):
 
@@ -283,7 +283,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --bu
 docker compose -f compose.yaml -f compose.gpu.yaml up --build
 ```
 
-It needs an NVIDIA driver and GPU support in Docker: Docker Desktop with the WSL 2 backend on Windows, or the NVIDIA Container Toolkit on Linux. To make it the default, set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` in `.env` (with `;` as the separator on Windows). Without the override, Ollama runs on the CPU.
+It needs an NVIDIA driver and GPU support in Docker: Docker Desktop with the WSL 2 backend on Windows, or the NVIDIA Container Toolkit on Linux. To make it the default, set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` in `.env` (with `;` as the separator on Windows). Without the override, Ollama runs on the CPU. Measured with the default model: 20–60 s per answer on the CPU, 3–10 s warm on an RTX 5070 Laptop GPU (the first answer also loads the models, about 45 s).
 
 **Ollama on the host** instead of the `ollama` service:
 
@@ -297,7 +297,7 @@ docker compose run --rm --no-deps --service-ports -e OLLAMA_BASE_URL=http://host
 docker compose run --rm --no-deps app agentic-rag config
 ```
 
-Run `eval` and `loadtest` on the host (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); this is the recommended way. The stack mounts only `data/raw`, so running them in the container needs an extra `./data/eval:/app/data/eval` bind mount, and the reports can then only be written if `data/eval/results` is writable by the container's user.
+Run `eval` and `loadtest` on the host (`uv run agentic-rag eval`, `uv run agentic-rag loadtest`); this is the recommended way. The stack mounts no host directory, so running them in the container needs a `./data/eval:/app/data/eval` bind mount, and the reports can then only be written if `data/eval/results` is writable by the container's user.
 
 **Linux hosts and UID 10001.** The `app` container runs as UID and GID 10001. A bind mount keeps the owner of the host directory, so on a Linux engine the app can write to a bind mount only if that directory is writable for UID 10001; Docker Desktop on Windows and macOS hides this, because it presents bind mounts as writable for everyone. Either make the directory writable for UID 10001, or build the image with your own IDs through the `APP_UID` and `APP_GID` build arguments:
 
@@ -305,18 +305,18 @@ Run `eval` and `loadtest` on the host (`uv run agentic-rag eval`, `uv run agenti
 APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
 ```
 
-Named volumes (`chroma-data`, `hf-cache`) take their owner from the image only while they are empty, so after changing the IDs, change their owner in place (the command is in the comment on the `app` service in [`compose.yaml`](compose.yaml)) or recreate them with `docker compose down -v`, which also deletes the index and the downloaded models.
+Named volumes (`corpus-data`, `chroma-data`, `hf-cache`) take their owner from the image only while they are empty, so after changing the IDs, change their owner in place (the command is in the comment on the `app` service in [`compose.yaml`](compose.yaml)) or recreate them with `docker compose down -v`, which also deletes the corpus, the index and the downloaded models.
 
 **The image on its own** (the required `Dockerfile`, without Compose):
 
 ```bash
 docker build -t agentic-rag-chatbot:dev .
-docker run --rm -p 127.0.0.1:8501:8501 --mount type=bind,source=./data/raw,target=/app/data/raw,readonly -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
+docker run --rm -p 127.0.0.1:8501:8501 -e LLM_PROVIDER=fake -e EMBEDDING_PROVIDER=fake agentic-rag-chatbot:dev
 ```
 
-The `--mount` form reaches Docker unchanged from Git Bash, PowerShell and POSIX shells; Git Bash would rewrite the short form `-v ./data/raw:/app/data/raw:ro` into a Windows path and mount the corpus at the wrong place, read-write. With plain `docker build`, pass `--build-arg APP_UID=... --build-arg APP_GID=...` for other IDs.
+Every new container downloads the corpus and builds the index again (about 45 s in fake mode). To keep them, add two volumes: `--mount type=volume,source=agentic-rag-corpus,target=/app/data/raw --mount type=volume,source=agentic-rag-index,target=/app/data/chroma_db`. `docker stop` ends the container at once, also while it is preparing the knowledge base. With plain `docker build`, pass `--build-arg APP_UID=... --build-arg APP_GID=...` for other IDs.
 
-**Image layers.** The `Dockerfile` has two stages. The `deps` stage installs only the dependencies pinned in `uv.lock` (`uv sync --locked --no-dev --no-install-project`); `--locked` stops the build when `uv.lock` is out of date with `pyproject.toml`. The runtime stage copies that virtual environment (1.71 GB) and compiles its bytecode (415 MB) in two layers that do not depend on the code, then adds `src/` (348 kB) and a small editable install of the project (115 kB). A change to `src/` therefore rebuilds only the two small layers: measured at 7 s, against about 53 s and a new 2.11 GB layer before the split. The image is 2.88 GB (`python:3.12.14-slim-trixie`, CPU-only torch); it contains no uv, no build files and no dev dependencies, and code and dependencies are root-owned and read-only for the app user.
+**Image layers.** The `Dockerfile` has two stages. The `deps` stage installs only the dependencies pinned in `uv.lock` (`uv sync --locked --no-dev --no-install-project`); `--locked` stops the build when `uv.lock` is out of date with `pyproject.toml`. The runtime stage copies that virtual environment (1.71 GB) and compiles its bytecode (415 MB) in two layers that do not depend on the code, then adds `src/` (348 kB) and a small editable install of the project (115 kB). A change to `src/` therefore rebuilds only the two small layers: measured at 7 s, against about 53 s and a new 2.11 GB layer before the split. The image is 3.02 GB (`python:3.12.14-slim-trixie`, CPU-only torch, and git for the corpus download, 105 MB); it contains no uv, no build files and no dev dependencies, and code and dependencies are root-owned and read-only for the app user.
 
 **Stop and clean up:**
 
@@ -325,11 +325,11 @@ docker compose down      # remove the containers and the network; keep the volum
 docker compose down -v   # also delete the volumes
 ```
 
-> **Warning:** `docker compose down -v` deletes the downloaded models (`ollama-data`, `hf-cache`) and the vector index (`chroma-data`); the next start downloads and builds them again.
+> **Warning:** `docker compose down -v` deletes the downloaded models (`ollama-data`, `hf-cache`), the corpus (`corpus-data`) and the vector index (`chroma-data`); the next start downloads and builds them again.
 
 More options, such as publishing the Ollama API on the host through a local `compose.override.yaml`, are described in the header of [`compose.yaml`](compose.yaml).
 
-> Verified so far: the image build (also with `APP_UID`/`APP_GID` set, and the `--locked` failure on a stale lock file), the layer reuse after a change to `src/`, both Compose configurations, the `app` service in fake mode (healthy, the UI served on port 8501), the `docker run --mount` command from Git Bash, a simulated Linux bind mount owned by UID 1000, and `ingest` in the container (fake embeddings, a temporary index directory): it reads the read-only corpus as the app user and produces the same 18 654 chunks as on Windows. Not run yet: the container `ingest` with the Hugging Face model into the `chroma-data` volume, the full stack with the Ollama services (model pull, GPU passthrough), a native Linux host and macOS. From Git Bash, `docker compose run -e NAME=/path` needs `MSYS_NO_PATHCONV=1`, or Git Bash rewrites the path into a Windows path.
+> Verified: the image build (also with `APP_UID`/`APP_GID` set, and the `--locked` failure on a stale lock file), the layer reuse after a change to `src/`, `docker build .` on its own, both Compose configurations, a simulated Linux bind mount owned by UID 1000, and on Windows with Docker Desktop: the full stack from a fresh clone (healthy after 25 minutes, then real answers from the container), a restart, fake mode with `--no-deps` and a plain `docker run` (the corpus downloaded and the index built at start-up, the UI answering), `docker stop` during the start-up preparation (stopped at once, exit code 130), and the GPU override (all 29 layers on an NVIDIA RTX 5070 Laptop GPU). Not run yet: a native Linux host and macOS. From Git Bash, `docker compose run -e NAME=/path` needs `MSYS_NO_PATHCONV=1`, or Git Bash rewrites the path into a Windows path.
 
 ### Configuration
 
@@ -357,7 +357,7 @@ Real environment variables take precedence over `.env`, and an empty value (`KEY
 | `TOP_K` | `4` | Chunks retrieved per query |
 | `GRADE_WITH_LLM` | `true` | Let the chat model drop retrieved chunks that do not help answer the query (one extra LLM call per retrieval; no effect in fake mode) |
 | `MAX_RETRIES` | `2` | Bound on the verify → re-plan loop |
-| `INGEST_ON_START` | `true` | Build the index at start-up when it is missing (no effect until Phase 6) |
+| `INGEST_ON_START` | `true` | At start-up (`agentic-rag serve`, the container's command), download the missing corpus sources and bring the index up to date; an index built with other embeddings is rebuilt |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 
 In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` for the `app` service, so a value in `.env` does not change it, and passes `LLM_PROVIDER`, `EMBEDDING_PROVIDER` and `OLLAMA_MODEL` from the shell or `.env`. Every other variable reaches the container only through `.env`. The full reference, with the validation rules, is in [docs/architecture.md](docs/architecture.md#configuration-reference).
@@ -406,7 +406,7 @@ agentic-rag-chatbot-poc/
 │   └── agentic_rag/
 │       ├── __init__.py             # package version
 │       ├── __main__.py             # `python -m agentic_rag`
-│       ├── cli.py                  # commands: ingest · eval · loadtest · export-graph · config
+│       ├── cli.py                  # commands: ingest · eval · loadtest · export-graph · config · serve
 │       ├── config.py               # Settings from environment variables and .env; logging set-up
 │       ├── errors.py               # PlannedFeatureError, ConfigurationError, InvalidArgumentError, planned()
 │       ├── llm.py                  # chat model factory: Ollama, or the scripted fake
@@ -434,7 +434,8 @@ agentic-rag-chatbot-poc/
 │       │   ├── markdown.py         # front matter, dialect cleaning (MDN, MDX, VitePress, MDC), sections
 │       │   ├── loaders.py          # corpus files → one Document per section, with citation metadata
 │       │   ├── chunking.py         # structure-aware chunks with a context line (900/150, code up to 1800)
-│       │   └── index.py            # build, update and open the Chroma index; IndexStats
+│       │   ├── index.py            # build, update, open and check the Chroma index; IndexStats
+│       │   └── prepare.py          # start-up preparation: download what is missing, update the index
 │       ├── evaluation/
 │       │   ├── dataset.py          # EvalItem and the questions.jsonl loader
 │       │   ├── metrics.py          # hit@k and routing accuracy; LLM-judged metrics in Phase 7
