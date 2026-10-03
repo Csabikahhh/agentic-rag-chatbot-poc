@@ -151,7 +151,8 @@ def analyze_request(
     ``synthesize_answer``. Depending on the intent it also writes:
 
     - ``direct``: ``draft_answer``, the reply to a request that needs neither retrieval nor a
-      tool (a greeting, a question about the assistant, a question outside the topic);
+      tool (a greeting, thanks, a question about the assistant; a question outside the topic
+      goes to ``single``, where the search finds nothing and the answer says so);
       ``finalize_response`` delivers it. A ``direct`` intent without a reply becomes
       ``single``.
     - ``single``: ``subtasks`` with exactly one ``retrieve`` sub-task, whose input is the
@@ -400,7 +401,9 @@ def call_tool(state: SubtaskInput, *, tools: Mapping[str, BaseTool]) -> dict[str
         }
     except ToolException as exc:
         return {"subtask_results": [_failed(subtask, str(exc))]}
-    result = SubtaskResult(subtask_id=subtask.id, kind="tool", output=str(output))
+    result = SubtaskResult(
+        subtask_id=subtask.id, kind="tool", output=str(output), tool_name=subtask.tool_name
+    )
     return {"subtask_results": [result]}
 
 
@@ -501,8 +504,10 @@ def finalize_response(state: AgentState) -> dict[str, Any]:
 
     - ``answer``: the draft, without citation markers that point past the end of ``sources``
       (and without the space before such a marker). The output of every successful tool call
-      follows verbatim, under a ``Tool result`` heading: the tools are deterministic, so their
-      exact figures and verdicts stay visible even where a small model restates them wrongly.
+      follows verbatim, under a ``Tool result`` heading with the tool's name, once per tool
+      and output (a re-plan may run the same check again): the tools are deterministic, so
+      their exact figures and verdicts stay visible even where a small model restates them
+      wrongly.
       When the last verdict is still ``"insufficient"`` (the retries are exhausted), the
       answer ends with an explicit note (:data:`PARTIAL_NOTE`) that names what is missing.
     - ``sources``: exactly the globally numbered list that ``synthesize_answer`` cited from
@@ -527,9 +532,13 @@ def finalize_response(state: AgentState) -> dict[str, Any]:
         state.get("draft_answer", "") or NO_DRAFT,
     ).strip()
     names = {subtask.id: subtask.tool_name for subtask in state.get("subtasks", [])}
+    shown: set[tuple[str, str]] = set()
     for result in results:
         if result.kind == "tool" and result.ok and result.output.strip():
-            name = names.get(result.subtask_id) or "tool"
+            name = result.tool_name or names.get(result.subtask_id) or "tool"
+            if (name, result.output.strip()) in shown:
+                continue  # A re-plan ran the same check again; show its output once.
+            shown.add((name, result.output.strip()))
             answer += f"\n\n**Tool result** (`{name}`):\n\n```text\n{result.output.strip()}\n```"
     if not direct and state.get("verdict") == "insufficient":
         critique = state.get("critique", "")
@@ -584,5 +593,10 @@ def _failed(subtask: Subtask, error: str) -> SubtaskResult:
     """A failed result with a short, single-line error."""
     message = " ".join(error.split())[:_MAX_ERROR_LENGTH] or "the step failed"
     return SubtaskResult(
-        subtask_id=subtask.id, kind=subtask.kind, output="", ok=False, error=message
+        subtask_id=subtask.id,
+        kind=subtask.kind,
+        output="",
+        ok=False,
+        error=message,
+        tool_name=subtask.tool_name,
     )

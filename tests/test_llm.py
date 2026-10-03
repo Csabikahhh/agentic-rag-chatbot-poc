@@ -90,6 +90,7 @@ def test_ollama_provider_gives_chat_ollama_without_connecting() -> None:
         4096,
     )
     assert model.client_kwargs == {"timeout": 45.0}
+    assert model.reasoning is None  # The model's default thinking mode.
 
 
 def test_get_chat_model_requires_explicit_settings() -> None:
@@ -174,6 +175,18 @@ def test_ollama_requests_send_the_context_window(
     assert [body["model"] for body in received] == ["tiny-model:1b"]
     # Without num_ctx in the options, Ollama would apply its own default context length.
     assert received[0]["options"]["num_ctx"] == 4096
+    assert "think" not in received[0]  # OLLAMA_REASONING unset: the model's default.
+
+
+def test_ollama_requests_can_turn_thinking_off(
+    ollama_stand_in: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base_url, received = ollama_stand_in
+    model = get_chat_model(ollama_settings(base_url, ollama_reasoning=False))
+
+    model.invoke("Reply with the single word OK.")
+
+    assert received[0]["think"] is False
 
 
 def test_ollama_requests_time_out_after_the_configured_seconds(stalled_server: str) -> None:

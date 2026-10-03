@@ -61,19 +61,19 @@ ANALYZE_INSTRUCTIONS: Final = (
     "Vue, Next.js, Nuxt and TypeScript, and it can run these tools:\n"
     "{catalog}\n\n"
     "Classify the latest user message into one intent:\n"
-    '- "direct": a greeting, thanks, a question about the assistant itself, or a question '
-    'outside web frontend development. Write the complete reply in "reply", in the user\'s '
-    "language; for a question outside the topic, do not answer it: say that the assistant "
-    "covers web frontend development only.\n"
+    '- "direct": a greeting, thanks, or a question about the assistant itself. Write the '
+    'complete reply in "reply", in the user\'s language.\n'
     '- "tool": a request that exactly one tool answers on its own: the contrast of two given '
     "colours (check_contrast), the specificity of given selectors (css_specificity), or "
     "whether a CSS, HTML, JavaScript or Web API feature works in given browsers "
     '(browser_support). Give "tool_name" and "tool_args" following the arguments of that '
     "tool. Never answer such a question from the documentation: the tool computes it.\n"
     '- "single": one question that the documentation answers with a single search. Write one '
-    'English search query with the key terms in "search_query".\n'
-    '- "complex": everything else: several questions, a comparison of frameworks or APIs, or '
-    "a question that needs both a tool and the documentation.\n"
+    'English search query with the key terms in "search_query". A question outside web '
+    'frontend development is "single" too: the search finds nothing, and the answer says so.\n'
+    '- "complex": everything else: several questions, a comparison of frameworks or APIs, a '
+    "question that needs the same tool twice, or one that needs both a tool and the "
+    "documentation.\n"
     'Always write "question": the latest message as a standalone question in the user\'s '
     'language, with references to earlier messages resolved, and "language": the language '
     "of the latest message, named in English (for example Hungarian or English).\n\n"
@@ -82,15 +82,20 @@ ANALYZE_INSTRUCTIONS: Final = (
     'segíteni?", "language": "Hungarian", "reply": "Szia! Webes frontend-fejlesztési '
     "kérdésekben segítek az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript "
     'dokumentációja alapján."}}\n'
-    'What is the capital of France? -> {{"intent": "direct", "question": "What is the '
-    'capital of France?", "language": "English", "reply": "I can only help with web '
-    'frontend development."}}\n'
+    'Who won the 2018 World Cup? -> {{"intent": "single", "question": "Who won the 2018 World '
+    'Cup?", "language": "English", "search_query": "2018 football World Cup winner"}}\n'
     'How does the useEffect cleanup work? -> {{"intent": "single", "question": "How does the '
     'useEffect cleanup work?", "language": "English", "search_query": "React useEffect '
     'cleanup function"}}\n'
     'Does #777 text on #fff pass AA? -> {{"intent": "tool", "question": "Does #777 text on '
     '#fff pass AA?", "language": "English", "tool_name": "check_contrast", "tool_args": '
     '{{"foreground": "#777", "background": "#fff"}}}}\n'
+    'Is .btn.primary more specific than button:hover? -> {{"intent": "tool", "question": '
+    '"Is .btn.primary more specific than button:hover?", "language": "English", '
+    '"tool_name": "css_specificity", "tool_args": {{"selectors": [".btn.primary", '
+    '"button:hover"]}}}}\n'
+    'Which reads better, #333 on #fff or #777 on #000? -> {{"intent": "complex", "question": '
+    '"Which reads better, #333 on #fff or #777 on #000?", "language": "English"}}\n'
     'Működik a :has() Safari 15-ben? -> {{"intent": "tool", "question": "Működik a :has() '
     'Safari 15-ben?", "language": "Hungarian", "tool_name": "browser_support", "tool_args": '
     '{{"feature": ":has()", "browsers": ["Safari 15"]}}}}\n'

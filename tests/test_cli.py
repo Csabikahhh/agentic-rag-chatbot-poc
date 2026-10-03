@@ -160,6 +160,16 @@ STUBS = [
 ]
 
 
+def install_runner(monkeypatch: pytest.MonkeyPatch, run_evaluation: Callable[..., Any]) -> None:
+    """Replace the evaluation runner module with one whose run_evaluation is given."""
+    install_module(
+        monkeypatch,
+        "agentic_rag.evaluation.runner",
+        run_evaluation=run_evaluation,
+        render_summary=str,
+    )
+
+
 def raising(error: BaseException) -> Callable[..., Any]:
     """A stand-in command target that raises ``error``."""
 
@@ -180,7 +190,8 @@ def test_planned_feature_prints_its_message_and_exits_with_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     error = planned(f"{module}.{function}", phase)
-    install_module(monkeypatch, module, **{function: raising(error)})
+    # render_summary is what eval prints; the other modules ignore the extra attribute.
+    install_module(monkeypatch, module, **{function: raising(error)}, render_summary=str)
 
     assert cli.main(argv) == 1
 
@@ -205,7 +216,7 @@ def test_planned_feature_prints_its_message_and_exits_with_1(
 def test_other_errors_of_a_command_propagate_with_their_traceback(
     error: Exception, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=raising(error))
+    install_runner(monkeypatch, raising(error))
 
     with pytest.raises(type(error)) as excinfo:
         cli.main(["eval"])
@@ -219,7 +230,7 @@ def test_a_validation_error_inside_a_command_is_not_a_configuration_error(
     def run_evaluation(settings: Settings, **kwargs: Any) -> Any:
         return Settings.model_validate({**settings.model_dump(), "top_k": 0})
 
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=run_evaluation)
+    install_runner(monkeypatch, run_evaluation)
 
     # Only the settings loaded at start-up are configuration; this one is a bug in the command.
     with pytest.raises(ValidationError):
@@ -231,7 +242,7 @@ def test_invalid_argument_error_is_reported_as_a_usage_error(
 ) -> None:
     message = "node 'verify_answer' cannot run from an evaluation item; choose analyze_request"
     error = InvalidArgumentError(message)
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=raising(error))
+    install_runner(monkeypatch, raising(error))
 
     assert cli.main(["eval", "--target", "node", "--node", "verify_answer"]) == 2
 
@@ -416,19 +427,25 @@ def test_ingest_builds_a_real_index_from_the_corpus(
     assert stats["embedding_provider"] == "fake"
 
 
-def test_eval_forwards_its_options(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_eval_forwards_its_options_and_prints_the_summary(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     dataset = tmp_path / "questions.jsonl"
     dataset.write_text('{"question": "?"}\n', encoding="utf-8")
     calls: list[dict[str, Any]] = []
+    report = Report(name="eval", count=1)
     install_module(
         monkeypatch,
         "agentic_rag.evaluation.runner",
-        run_evaluation=recorder(calls, Report(name="eval", count=1)),
+        run_evaluation=recorder(calls, report),
+        render_summary=lambda report: f"# Summary of {report.name}\n",
     )
 
-    assert cli.main(["eval"]) == 0
+    assert cli.main(["eval", "--judge-model", "judge:7b"]) == 0
+    assert capsys.readouterr().out == "# Summary of eval\n"
     argv = ["eval", "--target", "node", "--node", "analyze_request"]
     argv += ["--dataset", str(dataset), "--output-dir", str(tmp_path / "out")]
     assert cli.main(argv) == 0
@@ -440,6 +457,7 @@ def test_eval_forwards_its_options(
             "node": None,
             "dataset_path": None,
             "output_dir": None,
+            "judge_model": "judge:7b",
         },
         {
             "settings": settings,
@@ -447,8 +465,31 @@ def test_eval_forwards_its_options(
             "node": "analyze_request",
             "dataset_path": dataset,
             "output_dir": tmp_path / "out",
+            "judge_model": None,
         },
     ]
+
+
+def test_eval_without_an_index_prints_its_message_and_exits_with_1(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The committed question set, in fake mode, but no index was built.
+    assert cli.main(["eval"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("agentic-rag eval: The vector index 'documents' does not exist")
+    assert "Traceback" not in captured.err
+
+
+def test_eval_reports_an_invalid_question_set_with_its_line(
+    settings: Settings, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dataset = tmp_path / "questions.jsonl"
+    dataset.write_text('{"id": "q1"}\n', encoding="utf-8")
+
+    assert cli.main(["eval", "--dataset", str(dataset)]) == 1
+
+    assert capsys.readouterr().err.startswith(f"agentic-rag eval: {dataset}:1: invalid item")
 
 
 @pytest.mark.parametrize(
@@ -458,6 +499,10 @@ def test_eval_forwards_its_options(
         (["eval", "--node", "analyze_request"], "only be used with --target node"),
         (["eval", "--dataset", "missing.jsonl"], "file not found"),
         (["eval", "--target", "everything"], "invalid choice"),
+        (
+            ["eval", "--target", "node", "--node", "analyze_request", "--judge-model", "x"],
+            "--judge-model can only be used with --target graph",
+        ),
     ],
 )
 def test_eval_usage_errors(
@@ -787,6 +832,7 @@ def test_python_m_agentic_rag_exits_with_1_when_a_command_fails(
         f"    {raise_statement}\n"
         "runner = types.ModuleType('agentic_rag.evaluation.runner')\n"
         "runner.run_evaluation = run_evaluation\n"
+        "runner.render_summary = str\n"
         "sys.modules[runner.__name__] = runner\n"
         "sys.argv = ['agentic-rag', 'eval']\n"
         "runpy.run_module('agentic_rag', run_name='__main__')\n"

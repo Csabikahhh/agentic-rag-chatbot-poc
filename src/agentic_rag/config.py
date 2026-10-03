@@ -118,6 +118,13 @@ class Settings(BaseSettings):
         "(connecting, sending, and every wait for response data). Keep it generous: Ollama "
         "queues concurrent requests and may load the model before the first token.",
     )
+    ollama_reasoning: bool | None = Field(
+        default=None,
+        description="Thinking mode of reasoning models such as Qwen3.5: false turns it off, "
+        "true on; empty keeps the model's default. With thinking on, every LLM call writes a "
+        "long hidden reasoning first, which made Qwen3.5-4B about 15 times slower per question "
+        "in the evaluation. Models without a thinking mode ignore it.",
+    )
     llm_temperature: float = Field(
         default=0.0,
         ge=0.0,
@@ -213,7 +220,8 @@ class Settings(BaseSettings):
 
         Returns:
             The upper-case variable name of every field, in declaration order, mapped to its
-            value as text: booleans as ``true`` or ``false``, paths with forward slashes.
+            value as text: booleans as ``true`` or ``false``, paths with forward slashes, and
+            an unset optional value as an empty text, which loads back as unset.
         """
         return {
             name.upper(): _format_env_value(getattr(self, name)) for name in type(self).model_fields
@@ -234,7 +242,9 @@ def _is_ipv4_address(value: str) -> bool:
 
 
 def _format_env_value(value: object) -> str:
-    """Format one setting the way it is written in a ``.env`` file."""
+    """Format one setting the way it is written in a ``.env`` file; None is an empty value."""
+    if value is None:
+        return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, PurePath):

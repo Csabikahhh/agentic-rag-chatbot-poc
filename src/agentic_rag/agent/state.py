@@ -131,6 +131,11 @@ class SubtaskResult(BaseModel):
     )
     ok: bool = Field(default=True, description="False when the sub-task failed.")
     error: str | None = Field(default=None, description="Short, user-safe reason when ok is False.")
+    tool_name: str | None = Field(
+        default=None,
+        description="The tool that produced a 'tool' result, so the result names it also "
+        "after a re-plan has replaced its sub-task; None for 'retrieve'.",
+    )
 
     @model_validator(mode="after")
     def _check_error(self) -> Self:

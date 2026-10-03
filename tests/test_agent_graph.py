@@ -603,6 +603,26 @@ def test_finalize_response_shows_tool_output_verbatim() -> None:
     )
 
 
+def test_finalize_response_names_kept_tool_results_and_shows_a_repeated_check_once() -> None:
+    # s1 ran in a rejected round and was kept; the re-plan ran the same check again as s2.
+    support = Subtask(id="s2", kind="tool", input="q", tool_name="browser_support")
+    output = "Safari 15: not supported (added in 15.4)."
+    kept = SubtaskResult(subtask_id="s1", kind="tool", output=output, tool_name="browser_support")
+    again = SubtaskResult(subtask_id="s2", kind="tool", output=output, tool_name="browser_support")
+    state = AgentState(
+        messages=[HumanMessage("q")],
+        intent="tool",
+        draft_answer="No.",
+        subtasks=[support],
+        subtask_results=[kept, again],
+        verdict="grounded",
+    )
+
+    answer = nodes.finalize_response(state)["answer"]
+
+    assert answer == f"No.\n\n**Tool result** (`browser_support`):\n\n```text\n{output}\n```"
+
+
 def test_finalize_response_marks_a_partial_answer_and_keeps_direct_replies_clean() -> None:
     partial = AgentState(
         messages=[HumanMessage("q")],

@@ -79,7 +79,7 @@ The score ranges differ, so each provider has its own value. Measured on the bui
 - ``fake`` (hashed bag of words): the two groups overlap (0.28-0.59 against 0.27-0.43), so no
   threshold separates them; 0.0 keeps every chunk.
 
-The evaluation set (Phase 7) measures the values again.
+With them, the evaluation measured a retrieval hit@4 of 0.90 (``docs/evaluation.md``).
 """
 
 

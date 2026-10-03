@@ -27,6 +27,7 @@ EXPECTED_DEFAULTS = {
     "ollama_model": "qwen2.5:7b-instruct",
     "ollama_num_ctx": 8192,
     "ollama_timeout_s": 120.0,
+    "ollama_reasoning": None,
     "llm_temperature": 0.0,
     "embedding_provider": "huggingface",
     "embedding_model": "intfloat/multilingual-e5-small",
@@ -74,6 +75,7 @@ def test_environment_variables_override_defaults(
         "OLLAMA_MODEL": "llama3.1:8b",
         "OLLAMA_NUM_CTX": "16384",
         "OLLAMA_TIMEOUT_S": "30.5",
+        "OLLAMA_REASONING": "false",
         "LLM_TEMPERATURE": "0.7",
         "EMBEDDING_PROVIDER": "fake",
         "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5",
@@ -97,6 +99,7 @@ def test_environment_variables_override_defaults(
         "ollama_model": "llama3.1:8b",
         "ollama_num_ctx": 16384,
         "ollama_timeout_s": 30.5,
+        "ollama_reasoning": False,
         "llm_temperature": 0.7,
         "embedding_provider": "fake",
         "embedding_model": "BAAI/bge-small-en-v1.5",
@@ -442,6 +445,7 @@ def test_as_env_round_trips_through_the_environment(
     assert env["DATA_DIR"] == (tmp_path / "corpus").as_posix()
     assert env["CHROMA_DIR"] == "data/chroma_db"
     assert env["LLM_TEMPERATURE"] == "0.25"
+    assert env["OLLAMA_REASONING"] == ""  # Unset: empty, which loads back as unset.
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     assert Settings(_env_file=None) == settings

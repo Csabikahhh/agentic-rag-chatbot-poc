@@ -26,8 +26,8 @@ section text.
 The defaults are a starting point inside the plan's range of 800-1000 characters with 10-20 %
 overlap: 900 characters (roughly 200-300 tokens, well below the 512-token input limit of the
 E5 models) with 150 characters of overlap (about 17 %). Smaller chunks also keep the answer
-prompt short when several sub-tasks each contribute ``TOP_K`` chunks. The evaluation (Phase 7)
-measures them.
+prompt short when several sub-tasks each contribute ``TOP_K`` chunks. With them, the
+evaluation measured a retrieval hit@4 of 0.90 (``docs/evaluation.md``).
 
 Every chunk keeps the :class:`~agentic_rag.ingestion.loaders.DocumentMetadata` of its
 document and adds :class:`ChunkMetadata`.

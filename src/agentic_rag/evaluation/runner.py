@@ -1,39 +1,59 @@
 """Evaluation runner: the report models, the node targets and ``run_evaluation``.
 
-``run_evaluation`` (Phase 7) is the implementation behind ``agentic-rag eval`` (plan section
-5.6):
+``run_evaluation`` is the implementation behind ``agentic-rag eval`` (plan section 5.6):
 
 1. Load the question set with ``agentic_rag.evaluation.dataset.load_dataset`` (default
    ``data/eval/questions.jsonl``).
 2. Run every question on a fresh state through the full main graph (``target="graph"``) or
    through one node of :data:`NODE_TARGETS` (``target="node"``), with the provider that
-   ``Settings.llm_provider`` selects.
+   ``Settings.llm_provider`` selects. A question whose run fails records its error, and the
+   run goes on with the next one; only a missing or mismatched index stops the evaluation,
+   because it would fail every question.
 3. Score every outcome with ``agentic_rag.evaluation.metrics``: routing accuracy, retrieval
-   hit@k with ``k = Settings.top_k``, answer correctness and faithfulness.
-4. Write the :class:`EvalReport` as JSON to the output directory (default
-   ``agentic_rag.reports.RESULTS_DIR``, ``data/eval/results/``); the written summary goes to
-   ``docs/evaluation.md``.
+   hit@k with ``k = Settings.top_k``, and on the full graph answer correctness and
+   faithfulness, judged by the Ollama model (``OLLAMA_MODEL``, or ``judge_model``). The fake
+   LLM provider cannot judge, so its runs leave the judged metrics out.
+4. Write the :class:`EvalReport` as JSON and its Markdown summary (:func:`render_summary`) to
+   the output directory (default ``agentic_rag.reports.RESULTS_DIR``, ``data/eval/results/``)
+   with :func:`write_report`. ``docs/evaluation.md`` discusses the committed run.
 
-The report models are real already: they define the format of the committed result files.
-:class:`EvalItemResult` rejects verdicts that contradict its own item, :class:`EvalReport`
-computes its aggregate scores from its items, so the two never disagree, and the records
-reject NaN and infinite numbers, so every report serializes to valid JSON and loads back
-unchanged.
+The report models define the format of the committed result files. :class:`EvalItemResult`
+rejects verdicts that contradict its own item, :class:`EvalReport` computes its aggregate
+scores from its items, so the two never disagree, and the records reject NaN and infinite
+numbers, so every report serializes to valid JSON and loads back unchanged.
+
+Importing the module loads neither LangGraph nor a model library: ``run_evaluation`` imports
+the agent when it runs, so loading a committed report stays light.
 """
 
 import itertools
-from collections.abc import Iterable
+import logging
+import time
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import Any, Final, Literal, Self, get_args
+from typing import TYPE_CHECKING, Any, Final, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from agentic_rag.agent.types import Intent
 from agentic_rag.config import Settings
-from agentic_rag.errors import InvalidArgumentError, planned
-from agentic_rag.evaluation.dataset import EvalItem
-from agentic_rag.evaluation.metrics import JudgeScore, intent_matches, mean_score
-from agentic_rag.reports import RunReport
+from agentic_rag.errors import ConfigurationError, IndexNotFoundError, InvalidArgumentError
+from agentic_rag.evaluation.dataset import DEFAULT_DATASET_PATH, EvalItem, load_dataset
+from agentic_rag.evaluation.metrics import (
+    JudgeError,
+    JudgeScore,
+    answer_correctness,
+    faithfulness,
+    hit_at_k,
+    intent_matches,
+    mean_score,
+)
+from agentic_rag.reports import RESULTS_DIR, RunReport
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 __all__ = [
     "NODE_TARGETS",
@@ -42,8 +62,12 @@ __all__ = [
     "EvalScores",
     "EvalTarget",
     "MetricSummary",
+    "render_summary",
     "run_evaluation",
+    "write_report",
 ]
+
+logger = logging.getLogger(__name__)
 
 EvalTarget = Literal["graph", "node"]
 """What ``run_evaluation`` runs: the full main graph, or one node of :data:`NODE_TARGETS`."""
@@ -218,6 +242,11 @@ class EvalReport(RunReport):
         min_length=1,
         description="Path of the question set, with forward slashes; a Path is converted.",
     )
+    judge_model: str | None = Field(
+        default=None,
+        description="The Ollama model that judged answer correctness and faithfulness; None "
+        "when nothing was judged (the fake LLM provider, or a node target).",
+    )
     items: list[EvalItemResult] = Field(description="One result per question, in dataset order.")
 
     @field_validator("dataset", mode="before")
@@ -242,9 +271,9 @@ class EvalReport(RunReport):
             routing_accuracy=_summarize(result.intent_correct for result in self.items),
             hit_rate_at_k=_summarize(result.hit_at_k for result in self.items),
             answer_correctness=_summarize(
-                _judged(result.answer_correctness) for result in self.items
+                _score_of(result.answer_correctness) for result in self.items
             ),
-            faithfulness=_summarize(_judged(result.faithfulness) for result in self.items),
+            faithfulness=_summarize(_score_of(result.faithfulness) for result in self.items),
         )
 
     @computed_field
@@ -261,13 +290,12 @@ def run_evaluation(
     node: str | None = None,
     dataset_path: Path | None = None,
     output_dir: Path | None = None,
+    judge_model: str | None = None,
 ) -> EvalReport:
-    """Run the question set through the graph or one node and score it (planned for Phase 7).
+    """Run the question set through the graph or one node, score it and write the report.
 
-    Planned behaviour (see the module docstring): load the questions, run each one on a fresh
-    state, score it with ``agentic_rag.evaluation.metrics``, record a failing item's error
-    and carry on with the next one, then write the report as JSON to ``output_dir``. The
-    target and the node are checked already, before anything runs.
+    Every question runs on a fresh state (see the module docstring for the steps). A question
+    whose run fails records its error and scores as a failure: no answer, no route, no hit.
 
     Args:
         settings: The effective settings. The provider, the models and ``top_k`` shape the
@@ -278,8 +306,12 @@ def run_evaluation(
             ``target="node"`` and not allowed with ``target="graph"``.
         dataset_path: The question set; ``None`` means
             ``agentic_rag.evaluation.dataset.DEFAULT_DATASET_PATH``.
-        output_dir: Directory for the JSON report; ``None`` means
+        output_dir: Directory for the report files; ``None`` means
             ``agentic_rag.reports.RESULTS_DIR``.
+        judge_model: The Ollama model that judges the answers; ``None`` means
+            ``settings.ollama_model``. A judge other than the evaluated model keeps a
+            comparison of models fair. Ignored by node targets and with the fake LLM
+            provider, which judge nothing.
 
     Returns:
         The report, as written to ``output_dir``.
@@ -287,13 +319,303 @@ def run_evaluation(
     Raises:
         InvalidArgumentError: If ``target`` is neither ``"graph"`` nor ``"node"``, if
             ``node`` is missing with ``target="node"`` or given with ``target="graph"``, or if
-            it is not one of :data:`NODE_TARGETS`.
-        PlannedFeatureError: For valid arguments, until Phase 7.
+            it is not one of :data:`NODE_TARGETS`; or if the question set has no question.
+        FileNotFoundError: If the question set does not exist.
+        DatasetError: If a line of the question set is invalid.
+        IndexNotFoundError: If the vector index has not been built.
+        ConfigurationError: If the index was built with other embeddings
+            (``EmbeddingMismatchError``).
     """
     problem = _target_problem(target, node)
     if problem is not None:
         raise InvalidArgumentError(problem)
-    raise planned(f"{__name__}.run_evaluation", 7)
+    path = dataset_path or DEFAULT_DATASET_PATH
+    items = load_dataset(path)
+    if not items:
+        raise InvalidArgumentError(f"the question set {path} has no question")
+
+    run = _graph_runner(settings) if target == "graph" else _node_runner(settings, node or "")
+    judge: BaseChatModel | None = None
+    judge_name: str | None = None
+    if target == "graph" and settings.llm_provider != "fake":
+        judge_name = judge_model or settings.ollama_model
+        judge = _judge_model(settings, judge_name)
+    logger.info(
+        "Evaluating %d questions of %s on the %s with LLM_PROVIDER=%s%s",
+        len(items),
+        path,
+        "full graph" if target == "graph" else f"node {node}",
+        settings.llm_provider,
+        f" and the judge {judge_name}" if judge_name else "",
+    )
+    results = []
+    for number, item in enumerate(items, start=1):
+        result = _evaluate(item, run, judge, target=target, node=node, k=settings.top_k)
+        outcome = f"failed: {result.error}" if result.error else "done"
+        logger.info("%d/%d %s: %s", number, len(items), item.id, outcome)
+        results.append(result)
+    report = EvalReport(
+        settings=settings,
+        target=target,
+        node=node,
+        dataset=path,
+        judge_model=judge_name,
+        items=results,
+    )
+    write_report(report, output_dir or RESULTS_DIR)
+    return report
+
+
+def write_report(report: EvalReport, output_dir: Path) -> Path:
+    """Write a report as JSON and its Markdown summary next to it.
+
+    The file name holds the kind of run and the UTC time it finished, so runs never overwrite
+    each other: ``eval-graph-20261003T120000Z.json`` or
+    ``eval-node-analyze_request-20261003T120000Z.json``, and the same name with ``.md`` for
+    :func:`render_summary`.
+
+    Args:
+        report: The report to write.
+        output_dir: The directory; created when missing.
+
+    Returns:
+        The path of the JSON file.
+    """
+    stamp = report.created_at.strftime("%Y%m%dT%H%M%SZ")
+    kind = report.target if report.node is None else f"{report.target}-{report.node}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / f"eval-{kind}-{stamp}.json"
+    json_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
+    summary_path = json_path.with_suffix(".md")
+    summary_path.write_text(render_summary(report), encoding="utf-8", newline="\n")
+    logger.info("Wrote %s and %s", json_path, summary_path)
+    return json_path
+
+
+def render_summary(report: EvalReport) -> str:
+    """Summarize a report as Markdown: the configuration, the scores, every question.
+
+    Sections: the run and its settings; the aggregate scores with the number of questions
+    each metric applies to; the scores by tag (for tags of at least two questions, such as
+    ``english`` and ``hungarian``); one row per question; the judge's rationales; the errors.
+
+    Args:
+        report: The report to summarize.
+
+    Returns:
+        The Markdown text, ending with a newline.
+    """
+    settings = report.settings
+    what = "the full graph" if report.target == "graph" else f"the node `{report.node}`"
+    llm = settings.get("LLM_PROVIDER", "?")
+    if llm == "ollama":
+        llm += f" `{settings.get('OLLAMA_MODEL', '?')}`"
+    embeddings = settings.get("EMBEDDING_PROVIDER", "?")
+    if embeddings == "huggingface":
+        embeddings += f" `{settings.get('EMBEDDING_MODEL', '?')}`"
+    judge = f"`{report.judge_model}`" if report.judge_model else "none"
+    k = settings.get("TOP_K", "k")
+    lines = [
+        f"# Evaluation of {what}",
+        "",
+        f"- Run: {report.created_at:%Y-%m-%d %H:%M} UTC, dataset `{report.dataset}`, "
+        f"{len(report.items)} questions, {report.error_count} failed",
+        f"- LLM: {llm}; judge: {judge}",
+        f"- Embeddings: {embeddings}; TOP_K={k}; "
+        f"GRADE_WITH_LLM={settings.get('GRADE_WITH_LLM', '?')}",
+        "",
+        "| Metric | Score | Questions |",
+        "|---|---|---|",
+    ]
+    scores = report.scores
+    for label, summary in (
+        ("Routing accuracy", scores.routing_accuracy),
+        (f"Retrieval hit@{k}", scores.hit_rate_at_k),
+        ("Answer correctness", scores.answer_correctness),
+        ("Faithfulness", scores.faithfulness),
+    ):
+        lines.append(f"| {label} | {_format_score(summary.mean)} | {summary.count} |")
+    latencies = [result.latency_ms for result in report.items if result.latency_ms is not None]
+    if latencies:
+        lines += [
+            "",
+            f"Latency per question: mean {_format_seconds(mean_score(latencies) or 0.0)}, "
+            f"max {_format_seconds(max(latencies))}.",
+        ]
+    lines += _tag_table(report.items, k)
+    lines += [
+        "",
+        "## Questions",
+        "",
+        f"| Id | Tags | Route (expected → chosen) | hit@{k} | Correctness | Faithfulness "
+        "| Latency |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for result in report.items:
+        route = f"{result.item.expected_intent or '–'} → {result.predicted_intent or '–'}"
+        if result.intent_correct is not None:
+            route += f" {_mark(result.intent_correct)}"
+        lines.append(
+            f"| {result.item.id} | {', '.join(result.item.tags)} | {route} | "
+            f"{_mark(result.hit_at_k)} | "
+            f"{_format_judged(result.answer_correctness)} | "
+            f"{_format_judged(result.faithfulness)} | "
+            f"{_format_seconds(result.latency_ms) if result.latency_ms is not None else '–'} |"
+        )
+    rationales = [
+        f"- **{result.item.id}**: {_rationales(result)}"
+        for result in report.items
+        if result.answer_correctness is not None or result.faithfulness is not None
+    ]
+    if rationales:
+        lines += ["", "## Judge rationales", "", *rationales]
+    errors = [f"- **{r.item.id}**: {r.error}" for r in report.items if r.error is not None]
+    if errors:
+        lines += ["", "## Errors", "", *errors]
+    return "\n".join(lines) + "\n"
+
+
+@dataclass
+class _Outcome:
+    """What one run of a question produced, before scoring."""
+
+    answer: str | None = None
+    intent: Intent | None = None
+    retrieved: list[list[str]] = field(default_factory=list)
+    contexts: list[str] = field(default_factory=list)
+    grounded: bool = False  # The run searched or called a tool, whatever that produced.
+
+
+type _Runner = Callable[[str], _Outcome]
+"""Runs one question and returns its outcome."""
+
+
+def _graph_runner(settings: Settings) -> _Runner:
+    """Build the main graph once and return a runner of single questions through it."""
+    from langchain_core.messages import HumanMessage
+
+    from agentic_rag.agent.graph import build_agent_graph
+
+    graph = build_agent_graph(settings)
+
+    def run(question: str) -> _Outcome:
+        output = graph.invoke({"messages": [HumanMessage(question)]})
+        results = output.get("subtask_results", [])
+        return _Outcome(
+            answer=output.get("answer"),
+            intent=output.get("intent"),
+            retrieved=[_documents(result) for result in results if result.kind == "retrieve"],
+            contexts=[result.output for result in results if result.ok and result.output.strip()],
+            grounded=bool(results),
+        )
+
+    return run
+
+
+def _node_runner(settings: Settings, node: str) -> _Runner:
+    """Return a runner that drives one node of :data:`NODE_TARGETS` with its dependencies."""
+    from langchain_core.messages import HumanMessage
+
+    from agentic_rag.agent import nodes
+    from agentic_rag.agent.state import Subtask
+    from agentic_rag.agent.tools import get_tools
+    from agentic_rag.llm import get_chat_model
+
+    search_tool, *other_tools = get_tools(settings)
+    if node == "analyze_request":
+        chat_model = get_chat_model(settings)
+        tools = {tool.name: tool for tool in other_tools}
+
+        def analyze(question: str) -> _Outcome:
+            state = {"messages": [HumanMessage(question)]}
+            update = nodes.analyze_request(state, chat_model=chat_model, tools=tools)  # type: ignore[arg-type]
+            return _Outcome(answer=update.get("draft_answer"), intent=update.get("intent"))
+
+        return analyze
+
+    def retrieve(question: str) -> _Outcome:
+        subtask = Subtask(id="s1", kind="retrieve", input=question)
+        update = nodes.run_rag_subtask(
+            {"subtask": subtask, "question": question},
+            search_tool=search_tool,  # type: ignore[arg-type]
+        )
+        (result,) = update["subtask_results"]
+        return _Outcome(answer=result.output or None, retrieved=[_documents(result)])
+
+    return retrieve
+
+
+def _judge_model(settings: Settings, model: str) -> "BaseChatModel":
+    """The chat model that judges: the Ollama provider of the settings with ``model``."""
+    from agentic_rag.llm import get_chat_model
+
+    return get_chat_model(Settings.model_validate({**settings.model_dump(), "ollama_model": model}))
+
+
+def _documents(result: Any) -> list[str]:
+    """The ranked documents of a retrieve sub-task result (``Source.source`` of each chunk)."""
+    return [source.source for source in result.sources]
+
+
+def _evaluate(
+    item: EvalItem,
+    run: _Runner,
+    judge: "BaseChatModel | None",
+    *,
+    target: EvalTarget,
+    node: str | None,
+    k: int,
+) -> EvalItemResult:
+    """Run one question, score its outcome and return its result."""
+    started = time.perf_counter()
+    error: str | None = None
+    try:
+        outcome = run(item.question)
+    except (IndexNotFoundError, ConfigurationError):
+        raise  # Not specific to this question: every other one would fail the same way.
+    except Exception as exc:
+        logger.warning("Question %s failed", item.id, exc_info=True)
+        outcome, error = _Outcome(), f"{type(exc).__name__}: {exc}"
+    latency_ms = (time.perf_counter() - started) * 1000.0
+
+    routes = target == "graph" or node == "analyze_request"
+    retrieves = target == "graph" or node == "run_rag_subtask"
+    correctness = support = None
+    if judge is not None and outcome.answer:
+        correctness = _judged(
+            item,
+            "answer correctness",
+            lambda: answer_correctness(
+                item.question, outcome.answer or "", item.reference_answer, judge=judge
+            ),
+        )
+        if outcome.grounded:
+            support = _judged(
+                item,
+                "faithfulness",
+                lambda: faithfulness(outcome.answer or "", outcome.contexts, judge=judge),
+            )
+    return EvalItemResult(
+        item=item,
+        answer=outcome.answer,
+        predicted_intent=outcome.intent,
+        retrieved_documents=outcome.retrieved,
+        intent_correct=intent_matches(item.expected_intent, outcome.intent) if routes else None,
+        hit_at_k=hit_at_k(outcome.retrieved, item.expected_documents, k) if retrieves else None,
+        answer_correctness=correctness,
+        faithfulness=support,
+        latency_ms=latency_ms,
+        error=error,
+    )
+
+
+def _judged(item: EvalItem, metric: str, judge: Callable[[], JudgeScore]) -> JudgeScore | None:
+    """Run one judge call; a reply that cannot be read leaves the metric out, with a warning."""
+    try:
+        return judge()
+    except JudgeError as exc:
+        logger.warning("Question %s: %s not judged: %s", item.id, metric, exc)
+        return None
 
 
 def _target_problem(target: str, node: str | None) -> str | None:
@@ -318,6 +640,70 @@ def _summarize(scores: Iterable[float | None]) -> MetricSummary:
     return MetricSummary(mean=mean_score(applicable), count=len(applicable))
 
 
-def _judged(score: JudgeScore | None) -> float | None:
+def _score_of(score: JudgeScore | None) -> float | None:
     """Return the numeric score of an LLM-judged metric, or None when it was not judged."""
     return None if score is None else score.score
+
+
+def _tag_table(results: Sequence[EvalItemResult], k: str) -> list[str]:
+    """The scores by tag, for the tags of at least two questions; empty without such tags."""
+    by_tag: dict[str, list[EvalItemResult]] = defaultdict(list)
+    for result in results:
+        for tag in result.item.tags:
+            by_tag[tag].append(result)
+    rows = [
+        f"| {tag} | {len(group)} | "
+        f"{_format_score(mean_score(r.intent_correct for r in group))} | "
+        f"{_format_score(mean_score(r.hit_at_k for r in group))} | "
+        f"{_format_score(mean_score(_score_of(r.answer_correctness) for r in group))} | "
+        f"{_format_score(mean_score(_score_of(r.faithfulness) for r in group))} |"
+        for tag, group in sorted(by_tag.items())
+        if len(group) >= 2
+    ]
+    if not rows:
+        return []
+    return [
+        "",
+        "## By tag",
+        "",
+        f"| Tag | Questions | Routing | hit@{k} | Correctness | Faithfulness |",
+        "|---|---|---|---|---|---|",
+        *rows,
+    ]
+
+
+def _format_score(score: float | None) -> str:
+    """A mean score with two decimals, or a dash when the metric applied to no question."""
+    return "–" if score is None else f"{score:.2f}"
+
+
+def _format_judged(score: JudgeScore | None) -> str:
+    """A judged score with one decimal, or a dash when it was not judged."""
+    return "–" if score is None else f"{score.score:.1f}"
+
+
+def _format_seconds(milliseconds: float) -> str:
+    """A latency in seconds with one decimal."""
+    return f"{milliseconds / 1000.0:.1f} s"
+
+
+def _mark(verdict: bool | None) -> str:
+    """A check mark for a passed check, a cross for a failed one, a dash for none."""
+    if verdict is None:
+        return "–"
+    return "✓" if verdict else "✗"
+
+
+def _rationales(result: EvalItemResult) -> str:
+    """The judge's rationales of one question, on one line."""
+    parts = []
+    if result.answer_correctness is not None:
+        parts.append(
+            f"correctness {result.answer_correctness.score:.1f}: "
+            f"{result.answer_correctness.rationale}"
+        )
+    if result.faithfulness is not None:
+        parts.append(
+            f"faithfulness {result.faithfulness.score:.1f}: {result.faithfulness.rationale}"
+        )
+    return " · ".join(parts)

@@ -18,7 +18,7 @@ grading drops counts as a miss. Never use ``AgentOutput.sources`` instead: those
 chunks, de-duplicated and merged across the sub-tasks in citation order, so their positions
 are not ranks.
 
-Metrics judged by the local LLM (LLM-as-judge), planned for Phase 7:
+Metrics judged by a local LLM (LLM-as-judge):
 
 - Answer correctness (:func:`answer_correctness`): how well the answer agrees with the
   reference answer.
@@ -26,8 +26,11 @@ Metrics judged by the local LLM (LLM-as-judge), planned for Phase 7:
   retrieved context and the tool outputs.
 
 Both return a :class:`JudgeScore` and receive the judge model as an argument: the runner
-passes ``get_chat_model(settings)``, tests pass a ``ScriptedChatModel``. Either provider
-supports the structured output the judge prompt needs.
+passes the Ollama chat model, tests pass a ``ScriptedChatModel``. The judge does not write a
+number: it picks one of three verdicts (:data:`VERDICT_SCORES`), which small local models do
+far more consistently than a free score, and the verdict maps to 1, 0.5 or 0. The prompts
+tell it to compare substance, not wording, so an answer may differ from the reference answer
+in every word. A reply that cannot be read as a verdict raises :class:`JudgeError`.
 
 Conventions: scores lie in [0, 1] and higher is better. A per-item function returns ``None``
 when the metric does not apply to the item (no expected documents, no expected intent). The
@@ -38,17 +41,20 @@ aggregates average the applicable items only and return ``None`` when no item ap
 import itertools
 import math
 from collections.abc import Collection, Iterable, Sequence, Sized
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agentic_rag.agent.types import Intent
-from agentic_rag.errors import planned
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 __all__ = [
+    "CORRECTNESS_INSTRUCTIONS",
+    "FAITHFULNESS_INSTRUCTIONS",
+    "VERDICT_SCORES",
+    "JudgeError",
     "JudgeScore",
     "answer_correctness",
     "faithfulness",
@@ -70,6 +76,71 @@ class JudgeScore(BaseModel):
 
     score: float = Field(ge=0.0, le=1.0, description="From 0 (worst) to 1 (best).")
     rationale: str = Field(default="", description="The judge's short justification.")
+
+
+class JudgeError(RuntimeError):
+    """The judge model's reply could not be read as a verdict."""
+
+
+VERDICT_SCORES: Final[dict[str, float]] = {
+    "correct": 1.0,
+    "partially_correct": 0.5,
+    "incorrect": 0.0,
+    "supported": 1.0,
+    "partially_supported": 0.5,
+    "unsupported": 0.0,
+}
+"""Score of every judge verdict."""
+
+CORRECTNESS_INSTRUCTIONS: Final = """You grade the answer of a documentation assistant for \
+web developers against a reference answer that an expert wrote.
+
+Compare the substance: facts, names, numbers, code, verdicts and conclusions. Ignore the \
+wording, the length, the formatting, citation markers such as [1], and extra details that \
+are correct.
+
+- "correct": the answer states the key facts of the reference answer and contradicts none of \
+them.
+- "partially_correct": it states only some of the key facts, or it also makes a claim that \
+contradicts the reference answer on a secondary point.
+- "incorrect": it misses the key facts, gets a number, version, verdict or API of the main \
+point wrong, contradicts the reference answer on the main point, or does not answer the \
+question.
+
+When the reference answer says that the documentation does not cover the question, an answer \
+that says so is correct, and an answer that answers the question anyway is incorrect.
+
+Reply with the verdict and a one-sentence rationale."""
+"""System prompt of :func:`answer_correctness`."""
+
+FAITHFULNESS_INSTRUCTIONS: Final = """You check whether the answer of a documentation \
+assistant is supported by the material it was written from: documentation excerpts and tool \
+results.
+
+Check every factual claim of the answer against the material only, not against your own \
+knowledge. Ignore citation markers such as [1], greetings, and statements that the material \
+does not cover something.
+
+- "supported": every claim is backed by the material.
+- "partially_supported": the main claims are backed, but at least one other claim is not.
+- "unsupported": the main claims are not backed by the material, or contradict it.
+
+Reply with the verdict and a one-sentence rationale."""
+"""System prompt of :func:`faithfulness`."""
+
+
+class _CorrectnessVerdict(BaseModel):
+    """Structured reply of the correctness judge."""
+
+    verdict: Literal["correct", "partially_correct", "incorrect"]
+    rationale: str = Field(description="One sentence that justifies the verdict.")
+
+
+class _FaithfulnessVerdict(BaseModel):
+    """Structured reply of the faithfulness judge."""
+
+    verdict: Literal["supported", "partially_supported", "unsupported"]
+    rationale: str = Field(description="One sentence that justifies the verdict.")
 
 
 def hit_at_k(retrieved: Sequence[Sequence[str]], expected: Collection[str], k: int) -> bool | None:
@@ -201,47 +272,77 @@ def mean_score(scores: Iterable[float | None]) -> float | None:
 def answer_correctness(
     question: str, answer: str, reference_answer: str, *, judge: "BaseChatModel"
 ) -> JudgeScore:
-    """Judge how well an answer agrees with the reference answer (planned for Phase 7).
+    """Judge how well an answer agrees with the reference answer.
 
     The judge model reads the question, the reference answer and the system's answer and
-    rates agreement in substance (facts, numbers, conclusions) rather than in wording; a
-    partially correct answer scores in between.
+    picks a verdict on agreement in substance (facts, numbers, conclusions) rather than in
+    wording: ``correct`` (1), ``partially_correct`` (0.5) or ``incorrect`` (0).
 
     Args:
         question: The evaluation question.
         answer: The system's final answer.
         reference_answer: ``EvalItem.reference_answer``.
-        judge: The chat model that judges, usually ``get_chat_model(settings)``.
+        judge: The chat model that judges.
 
     Returns:
         The score in [0, 1] with the judge's rationale.
 
     Raises:
-        PlannedFeatureError: Always, until Phase 7.
+        JudgeError: If the judge's reply cannot be read as a verdict.
     """
-    raise planned(f"{__name__}.answer_correctness", 7)
+    body = (
+        f"Question:\n{question}\n\nReference answer:\n{reference_answer}\n\n"
+        f"Answer to grade:\n{answer}"
+    )
+    return _judge(judge, _CorrectnessVerdict, CORRECTNESS_INSTRUCTIONS, body)
 
 
 def faithfulness(answer: str, contexts: Sequence[str], *, judge: "BaseChatModel") -> JudgeScore:
-    """Judge whether the claims of an answer are supported by its contexts (Phase 7).
+    """Judge whether the claims of an answer are supported by its contexts.
 
     The judge model checks the answer against the texts it was generated from and penalizes
-    claims that the contexts do not support, whether or not they happen to be true. Items
-    without any context (``direct`` answers) are not scored.
+    claims that the contexts do not support, whether or not they happen to be true:
+    ``supported`` (1), ``partially_supported`` (0.5) or ``unsupported`` (0). The caller
+    decides when the metric applies: the runner judges every run that searched or called a
+    tool, also when that produced no material, because then every factual claim of the
+    answer is unsupported; it skips ``direct`` replies.
 
     Args:
         answer: The system's final answer.
         contexts: The texts the answer may rely on: the RAG contexts and the tool outputs of
             the sub-task results.
-        judge: The chat model that judges, usually ``get_chat_model(settings)``.
+        judge: The chat model that judges.
 
     Returns:
         The score in [0, 1] with the judge's rationale.
 
     Raises:
-        PlannedFeatureError: Always, until Phase 7.
+        TypeError: If ``contexts`` is a single string.
+        JudgeError: If the judge's reply cannot be read as a verdict.
     """
-    raise planned(f"{__name__}.faithfulness", 7)
+    _check_not_text(contexts, "contexts")
+    material = "\n\n---\n\n".join(context.strip() for context in contexts if context.strip())
+    body = f"Material:\n{material or '(none)'}\n\nAnswer to check:\n{answer}"
+    return _judge(judge, _FaithfulnessVerdict, FAITHFULNESS_INSTRUCTIONS, body)
+
+
+def _judge(
+    judge: "BaseChatModel",
+    schema: type[_CorrectnessVerdict | _FaithfulnessVerdict],
+    instructions: str,
+    body: str,
+) -> JudgeScore:
+    """Ask the judge for a structured verdict and turn it into a score."""
+    # Imported here and not at the top: loading a committed report must not load LangChain.
+    from langchain_core.exceptions import OutputParserException
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    messages = [SystemMessage(instructions), HumanMessage(body)]
+    try:
+        reply = schema.model_validate(judge.with_structured_output(schema).invoke(messages))
+    except (OutputParserException, ValidationError) as exc:
+        raise JudgeError(f"the judge's verdict could not be read: {exc}") from exc
+    return JudgeScore(score=VERDICT_SCORES[reply.verdict], rationale=reply.rationale.strip())
 
 
 def _check_k(k: int) -> None:

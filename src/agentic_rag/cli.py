@@ -3,7 +3,8 @@
 Commands:
     ingest        Build the vector index from the corpus in DATA_DIR; with --download, first
                   download the corpus sources of data/sources.toml.
-    eval          Run the functional evaluation on the full graph or one node (Phase 7).
+    eval          Run the functional evaluation on the full graph or one node; write the
+                  report and print its summary.
     loadtest      Send N queries at a given concurrency and report latencies (Phase 8).
     export-graph  Print or write the Mermaid diagrams of the compiled graphs (Phases 3-4).
     config        Print the effective settings as KEY=value lines.
@@ -14,7 +15,8 @@ Exit codes:
     0    Success.
     1    The command failed. A feature that is planned for a later phase
          (``agentic_rag.errors.PlannedFeatureError``), a missing corpus and a failed corpus
-         download (``ingest``) print only their message. Any other
+         download (``ingest``), and a missing or invalid question set or a missing index
+         (``eval``) print only their message. Any other
          exception propagates with its traceback (Python then exits with 1), including a
          plain ``NotImplementedError`` from a library and a ``ValidationError`` raised inside
          a command: those are bugs, not planned gaps or configuration errors.
@@ -198,6 +200,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="directory for the result files (default: data/eval/results)",
     )
+    evaluation.add_argument(
+        "--judge-model",
+        metavar="NAME",
+        help="the Ollama model that judges the answers (default: OLLAMA_MODEL); a fixed "
+        "judge keeps a comparison of models fair. Only with --target graph",
+    )
 
     loadtest = _add_command(
         commands, "loadtest", _run_loadtest, "run the load test against the compiled graph"
@@ -358,6 +366,8 @@ def _check_eval_args(args: argparse.Namespace) -> str | None:
         return "--node can only be used with --target node"
     if args.dataset is not None and not args.dataset.is_file():
         return f"--dataset: file not found: {args.dataset}"
+    if args.judge_model is not None and args.target != "graph":
+        return "--judge-model can only be used with --target graph"
     return None
 
 
@@ -395,17 +405,26 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _run_eval(args: argparse.Namespace, settings: Settings) -> int:
-    """Run the evaluation with ``agentic_rag.evaluation.runner.run_evaluation``."""
-    from agentic_rag.evaluation.runner import run_evaluation
+    """Run the evaluation with ``agentic_rag.evaluation.runner.run_evaluation``.
 
-    report = run_evaluation(
-        settings,
-        target=args.target,
-        node=args.node,
-        dataset_path=args.dataset,
-        output_dir=args.output_dir,
-    )
-    _print_result(report)
+    The report files are written by the runner; the Markdown summary goes to standard output.
+    """
+    from agentic_rag.evaluation.dataset import DatasetError
+    from agentic_rag.evaluation.runner import render_summary, run_evaluation
+
+    try:
+        report = run_evaluation(
+            settings,
+            target=args.target,
+            node=args.node,
+            dataset_path=args.dataset,
+            output_dir=args.output_dir,
+            judge_model=args.judge_model,
+        )
+    except (FileNotFoundError, DatasetError) as exc:  # The question set or the index.
+        print(f"{PROG} eval: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.write(render_summary(report))
     return 0
 
 
