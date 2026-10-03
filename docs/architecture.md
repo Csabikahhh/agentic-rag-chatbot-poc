@@ -44,11 +44,11 @@ A request takes this path through the target design:
 | Embeddings | `agentic_rag.embeddings` | sentence-transformers on the CPU, or the offline `HashingEmbeddings` |
 | Ingestion and index | `agentic_rag.ingestion` | Load, split, embed and store the corpus in Chroma |
 | Step traces | `agentic_rag.tracing` | `TraceEvent` records and the `@traced` node decorator |
-| UI | `agentic_rag.ui` | Streamlit chat with a step panel and a retrieved-context panel |
+| UI | `agentic_rag.ui` | Streamlit chat with a live step panel (the RAG subgraph's steps under each search) and a retrieved-context panel |
 | Evaluation | `agentic_rag.evaluation` | Question-set loader, metrics, report models, `run_evaluation` |
 | Load test | `agentic_rag.loadtest` | Latency statistics, report model, `run_load_test` |
 | Run reports | `agentic_rag.reports` | `RESULTS_DIR` and `RunReport`, the base of `EvalReport` and `LoadTestReport` |
-| Errors | `agentic_rag.errors` | `PlannedFeatureError`, `ConfigurationError`, `InvalidArgumentError` and `planned()` |
+| Errors | `agentic_rag.errors` | `PlannedFeatureError`, `ConfigurationError`, `InvalidArgumentError`, the index errors `IndexNotFoundError` and `EmbeddingMismatchError`, and `planned()` |
 | CLI | `agentic_rag.cli` | `ingest`, `eval`, `loadtest`, `export-graph`, `config` |
 | Settings | `agentic_rag.config` | One `Settings` object from environment variables and `.env` |
 
@@ -335,6 +335,7 @@ One successful execution of a graph node.
 | `duration_ms` | `float` (≥ 0) | Required | Execution time in milliseconds, measured with `time.perf_counter` |
 | `summary` | `str` | `""` | One-line, human-readable outcome for the UI step panel |
 | `metadata` | `dict[str, Any]` | `{}` | Small JSON-serializable details, such as counts or scores |
+| `step` | `int \| None` | `None` | LangGraph step (superstep) of the graph that ran the node, from the run config (`langgraph_step`); the nodes of one step ran in parallel. A subgraph counts its own steps. `None` outside a graph run |
 
 ### Persistence
 
@@ -379,9 +380,10 @@ Cheap builds: creating `ChatOllama` makes no connection, and no model is loaded 
 - **Streaming.** Every `"updates"` chunk carries the events of the node that has just finished, and `trace_events_from_chunk(chunk)` extracts them. It accepts three chunk shapes: a `version="v2"` stream part (`{"type": "updates", "ns": ..., "data": {node: update}}`), a plain `{node: update}` mapping from `stream_mode="updates"`, and a `(namespace, {node: update})` tuple from the same call with `subgraphs=True`. Every other chunk, including the `(mode, data)` tuples of a `version="v1"` stream with several modes, yields no events. With `subgraphs=True` the forwarded events arrive twice; `skip_forwarded=True` keeps only the events a node recorded itself.
 - **Outside the contract.** `Command(graph=Command.PARENT)` from a subgraph node: its update would reach the stream only under the parent node's key, where `skip_forwarded` drops it, and the subgraph's earlier events would never reach the final state. The phase that first returns a `Command` adds the support and this rule.
 - **Caching.** Do not give a traced node a LangGraph `CachePolicy`: a cache hit replays the node's cached writes, the old event included, so the trace would report the original start time and duration for a step that took no time. Cache inside the node instead (for example, memoize the vector search by query), so that every execution records a fresh event.
+- **Steps.** Every event also records the LangGraph step that ran the node (`TraceEvent.step`), which `traced` reads from the run config (`langgraph_step`) while the node runs. The nodes of one step ran in parallel: in the main graph, the `Send` workers of one planning round share a step, and the next round runs in later steps. The RAG subgraph counts its own steps (1–4).
 - **Clock.** The timestamps are epoch seconds on a clock that anchors `time.perf_counter` to `time.time` once, at import: monotonic, with sub-microsecond resolution, whereas `time.time` advances in 15.6 ms steps on Windows. `epoch_now()` reads the same clock, for example for the request timestamps of the load test.
-- **Imports.** `agentic_rag.tracing` depends only on Pydantic, so the report models can use `TraceEvent` without loading LangGraph.
-- **UI.** The updates feed the step panel with the main graph's own steps (`skip_forwarded=True`); the last root `values` part gives the answer and the sources. Steps whose time windows overlap are grouped into one parallel step. The grouping sees wall-clock time only, so a `Send` worker that finishes before the next one starts (such as a fast pure-Python tool) shows as a sequential step of its own; the offsets and durations stay correct. Grouping by LangGraph step (`langgraph_step`, together with `langgraph_checkpoint_ns`) is left to Phase 5.
+- **Imports.** Importing `agentic_rag.tracing` loads only Pydantic, so the report models can use `TraceEvent` without loading LangGraph; `traced` imports LangGraph's config accessor when a node runs.
+- **UI.** `agent_steps_from_chunk` (`agentic_rag.ui.components`) turns every `updates` part into main steps (`AgentStep`): the event a node recorded itself, with the events it forwarded from a subgraph as its sub-steps, so a search step lists the RAG subgraph's steps under it. The last root `values` part gives the answer and the sources. The step panel groups the main steps by `TraceEvent.step`, so the `Send` workers of one round form one parallel step even when a fast tool finished before the next worker started; an event without a step is grouped by overlapping time instead.
 
 ## Re-planning and the subtask_results reset
 
@@ -429,6 +431,7 @@ CLI exit codes (`agentic_rag.cli`):
 The Streamlit UI:
 
 - shows a `PlannedFeatureError` as a notice in the assistant turn;
+- explains a failure the user can fix in the assistant turn and logs it as a warning, without the traceback (`describe_failure`): a missing index (`IndexNotFoundError`: build it with `agentic-rag ingest --download`), an index built with other embeddings (`EmbeddingMismatchError`), and with the `ollama` provider a connection to `OLLAMA_BASE_URL` that failed or a model that Ollama does not have (pull it). The two index errors live in `agentic_rag.errors`, so the UI recognizes them without importing the index module, which loads Chroma;
 - logs any other exception with its traceback and shows it with `st.exception` in the assistant turn; the conversation is kept;
 - replaces the chat with an `Invalid configuration` error when `get_settings()` raises a `ValidationError` (the invalid variables, from `describe_invalid_settings`) or a `ConfigurationError` (its message);
 - closes a run the user stops with the turn *Stopped before an answer was produced.*, so the history never keeps an unanswered question. The agent receives the new question and only the earlier questions that were answered, with their answers;
@@ -484,12 +487,12 @@ In the Compose stack, the `app` service receives `LLM_PROVIDER`, `EMBEDDING_PROV
 | Settings, errors and CLI | `config` (with `describe_invalid_settings`), `errors`, `cli`, `__main__` | None |
 | Chat model | `get_chat_model` (with `num_ctx` and the request timeout), `ScriptedChatModel` (ordered regex rules, optionally expanding their groups, JSON structured output, sync only), `DEFAULT_FAKE_RULES` for the real prompts | None |
 | Embeddings | `get_embeddings`, `HashingEmbeddings`, the E5 prefix detection | None |
-| Step traces | `TraceEvent`, `traced`, `trace_events_from_chunk`, `epoch_now` | None |
+| Step traces | `TraceEvent` (with the LangGraph step), `traced`, `trace_events_from_chunk`, `epoch_now` | None |
 | State contracts | `AgentState`, `RagState`, their records and the literal types in `agent.types` | None |
 | Ingestion | The source list and the download (`sources`, `download`), the Markdown cleaning (`markdown`), the loaders, the chunking, `build_index` and `load_index`, with their data contracts | None |
 | RAG subgraph | The four nodes with their prompts, `MIN_SCORES` and `build_rag_graph` with the lazy, lock-guarded index provider | None |
 | Main workflow | The seven nodes with their prompts, the three routing functions, the four tools and `build_agent_graph` | None |
-| UI | The chat page with stop handling, the step panel, the retrieved-context panel, the settings summary; it now streams the real main graph | The check against the real graph and the grouping of parallel steps by LangGraph step (Phase 5) |
+| UI | The chat page with stop handling, example questions and explained failures; the step panel, grouped by LangGraph step, with the RAG subgraph's steps under each search; the retrieved-context panel; the settings summary. Checked against the real main graph | None |
 | Evaluation | `EvalItem`, `load_dataset`, hit@k, routing accuracy, the report models, `NODE_TARGETS` | The LLM-judged correctness and faithfulness, `run_evaluation` (Phase 7) |
 | Load test | `percentile`, the latency summaries, `LoadTestReport` | `run_load_test` (Phase 8) |
 | Reports | `RESULTS_DIR`, `RunReport` | None |

@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2, 3 and 4 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it. The evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 5 (the UI against the real graph), then the evaluation. Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 5 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer. The evaluation and load-test runners are typed skeletons that report the phase they are planned for. Next: Phase 6 (the container entrypoint and the full-stack run), then the evaluation. Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -53,7 +53,7 @@ Status of each requirement from the brief:
 **Model, UI & deployment**
 
 - [ ] Open-source LLM that fits the local resources (no paid APIs), with the trade-offs justified
-- [ ] Streamlit prototype UI that shows the agent's main steps and the result of the RAG process
+- [x] Streamlit prototype UI that shows the agent's main steps and the result of the RAG process
 - [ ] Containerized: `Dockerfile` (required) and `docker-compose.yml` (a plus for multi-component setups)
 
 **Evaluation & performance**
@@ -184,7 +184,7 @@ The foundation and the knowledge base run end to end, but the chatbot does not a
 - the RAG subgraph answers `invoke({"query": ...})` with a cited context and its sources. In fake mode it skips the model calls; with Ollama it rewrites and grades (measured with Qwen2.5-7B-Instruct on a laptop GPU, see *Design decisions*). A question outside the corpus, such as *What is the capital of France?*, gets an empty context;
 - `eval`, `loadtest` and `export-graph` print the phase they are planned for (`… is planned for Phase N (see docs/project-structure-plan.md, section 8)`) and exit with code 1;
 - the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. Measured with Qwen2.5-7B-Instruct on a laptop GPU, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
-- the Streamlit UI streams the main workflow: the step panel shows the steps, parallel ones grouped, and the retrieved-context panel the numbered sources. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
+- the Streamlit UI streams the main workflow: the step panel shows each step as it finishes, groups the parallel ones by LangGraph step and lists under each search the steps of the RAG subgraph (the English search query, the retrieved and the kept chunks), and the retrieved-context panel shows the numbered sources with a link to each page. The empty chat offers one example question per route (a search, a comparison asked in Hungarian, one question per tool), which also work with the fake LLM. A missing index, an index built with other embeddings, an unreachable Ollama and a model that is not pulled are explained in the chat with the fix. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - the image builds, and the `app` service starts healthy in fake mode.
 
 ### Local development with uv
@@ -228,7 +228,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `757 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `766 passed, 1 deselected` (measured on 2026-10-02; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
@@ -443,7 +443,7 @@ agentic-rag-chatbot-poc/
 │       │   └── runner.py           # latency statistics and report model; run_load_test() in Phase 8
 │       └── ui/
 │           ├── app.py              # Streamlit entrypoint
-│           └── components.py       # step panel, retrieved-context panel, settings summary
+│           └── components.py       # step panel, retrieved-context panel, failure hints, examples
 ├── task/                           # assignment brief (Hungarian); local only, gitignored
 ├── tests/                          # offline pytest suite (fake providers)
 │   ├── conftest.py                 # keeps the shell and .env out of the tests; the `settings` fixture

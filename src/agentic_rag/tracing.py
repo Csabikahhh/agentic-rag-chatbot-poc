@@ -37,8 +37,13 @@ Python 3.12), so fast nodes and parallel ``Send`` workers keep their order, and
 ``ended_at - started_at`` matches ``duration_ms``. Use :func:`epoch_now` to take timestamps on
 the same clock elsewhere, for example request start times in the load test.
 
-The module depends only on pydantic, so importing it (for :class:`TraceEvent` in a report
-model, for example) does not load LangGraph.
+Steps: every event also records the LangGraph step that ran the node (``TraceEvent.step``),
+read from the run config while the node runs. The nodes of one step ran in parallel, so the UI
+groups the ``Send`` workers of one round by their step; overlapping time windows would miss a
+fast worker that finishes before the next one starts.
+
+Importing the module loads only pydantic, not LangGraph (for :class:`TraceEvent` in a report
+model, for example); the decorator imports LangGraph's config accessor when a node runs.
 """
 
 import functools
@@ -102,6 +107,14 @@ class TraceEvent(BaseModel):
         default_factory=dict,
         description="Small JSON-serializable details, for example counts or scores.",
     )
+    step: int | None = Field(
+        default=None,
+        description=(
+            "LangGraph step (superstep) of the graph that ran the node, from the run config "
+            "(`langgraph_step`): nodes of one step ran in parallel, such as the Send workers "
+            "of one round. A subgraph counts its own steps. None outside a graph run."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_time_order(self) -> Self:
@@ -155,7 +168,8 @@ def traced[F: Callable[..., Any]](
     ``None``). Events the node put there itself, the forwarded events of a subgraph, stay in
     front. Any other return value, ``Command`` included, raises ``TypeError``. If a graph's
     state has no ``trace`` key, LangGraph silently drops the extra key, so decorated nodes
-    also work in graphs that do not collect traces.
+    also work in graphs that do not collect traces. The event's ``step`` is the LangGraph
+    step that ran the node, or ``None`` when the function is called outside a graph.
 
     Exceptions are never swallowed. When the node raises, including LangGraph control-flow
     exceptions such as ``GraphInterrupt``, the exception propagates unchanged and no event is
@@ -307,9 +321,24 @@ def _finish(
         duration_ms=(end - start) * 1000.0,
         summary=summarize(update) if summarize else "",
         metadata=dict(metadata(update)) if metadata else {},
+        step=_current_step(),
     )
     logger.debug("Node %r finished in %.1f ms", node, event.duration_ms)
     return {**update, TRACE_KEY: [*_forwarded_events(update, node), event]}
+
+
+def _current_step() -> int | None:
+    """Return the LangGraph step that is running the current node, or None outside a graph."""
+    # Imported here and not at the top, so that importing this module loads no LangGraph. While
+    # a graph runs a node, LangGraph is loaded already and the import costs nothing.
+    from langgraph.config import get_config
+
+    try:
+        config = get_config()
+    except RuntimeError:  # Called outside a runnable context: no graph is running the node.
+        return None
+    step = config.get("metadata", {}).get("langgraph_step")
+    return step if isinstance(step, int) else None
 
 
 def _log_exit(node: str, start: float) -> None:

@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agentic_rag.config import EmbeddingProvider, Settings
 from agentic_rag.embeddings import get_embeddings
-from agentic_rag.errors import ConfigurationError
+from agentic_rag.errors import EmbeddingMismatchError, IndexNotFoundError
 from agentic_rag.ingestion.chunking import ChunkingConfig, split_documents
 from agentic_rag.ingestion.loaders import list_corpus_files, load_documents
 
@@ -64,25 +64,6 @@ EMBEDDING_BATCH_SIZE: Final = 256
 
 _PROVIDER_KEY: Final = "embedding_provider"
 _MODEL_KEY: Final = "embedding_model"
-
-
-class IndexNotFoundError(FileNotFoundError):
-    """The vector index has not been built yet.
-
-    Raised by :func:`load_index`. The message names the directory and the collection and
-    tells to run ``agentic-rag ingest``. As a ``FileNotFoundError``, it is also caught by
-    callers that only handle missing files.
-    """
-
-
-class EmbeddingMismatchError(ConfigurationError):
-    """The vector index was built with another embedding provider or model.
-
-    Vectors of different models are not comparable, so the index has to be rebuilt with
-    ``agentic-rag ingest --rebuild``, or the settings have to match the index again. As a
-    ``ConfigurationError`` (a ``ValueError``), the CLI reports it with exit code 2 and the UI
-    as an invalid configuration.
-    """
 
 
 class IndexStats(BaseModel):
