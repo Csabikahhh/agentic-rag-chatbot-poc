@@ -24,9 +24,10 @@ CONFIGURED_ENV_FILE = Settings.model_config.get("env_file")
 EXPECTED_DEFAULTS = {
     "llm_provider": "ollama",
     "ollama_base_url": "http://localhost:11434",
-    "ollama_model": "qwen2.5:7b-instruct",
+    "ollama_model": "qwen3.5:4b",
     "ollama_num_ctx": 8192,
     "ollama_timeout_s": 120.0,
+    "ollama_reasoning": False,
     "llm_temperature": 0.0,
     "embedding_provider": "huggingface",
     "embedding_model": "intfloat/multilingual-e5-small",
@@ -34,6 +35,7 @@ EXPECTED_DEFAULTS = {
     "chroma_dir": Path("data/chroma_db"),
     "chroma_collection": "documents",
     "top_k": 4,
+    "grade_with_llm": True,
     "max_retries": 2,
     "ingest_on_start": True,
     "log_level": "INFO",
@@ -73,6 +75,7 @@ def test_environment_variables_override_defaults(
         "OLLAMA_MODEL": "llama3.1:8b",
         "OLLAMA_NUM_CTX": "16384",
         "OLLAMA_TIMEOUT_S": "30.5",
+        "OLLAMA_REASONING": "true",
         "LLM_TEMPERATURE": "0.7",
         "EMBEDDING_PROVIDER": "fake",
         "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5",
@@ -80,6 +83,7 @@ def test_environment_variables_override_defaults(
         "CHROMA_DIR": str(tmp_path / "index"),
         "CHROMA_COLLECTION": "docs_v1.0-test",
         "TOP_K": "7",
+        "GRADE_WITH_LLM": "false",
         "MAX_RETRIES": "0",
         "INGEST_ON_START": "false",
         "LOG_LEVEL": "WARNING",
@@ -95,6 +99,7 @@ def test_environment_variables_override_defaults(
         "ollama_model": "llama3.1:8b",
         "ollama_num_ctx": 16384,
         "ollama_timeout_s": 30.5,
+        "ollama_reasoning": True,
         "llm_temperature": 0.7,
         "embedding_provider": "fake",
         "embedding_model": "BAAI/bge-small-en-v1.5",
@@ -102,6 +107,7 @@ def test_environment_variables_override_defaults(
         "chroma_dir": tmp_path / "index",
         "chroma_collection": "docs_v1.0-test",
         "top_k": 7,
+        "grade_with_llm": False,
         "max_retries": 0,
         "ingest_on_start": False,
         "log_level": "WARNING",
@@ -129,7 +135,7 @@ def test_empty_values_fall_back_to_defaults(monkeypatch: pytest.MonkeyPatch) -> 
     settings = Settings(_env_file=None)
 
     assert settings.top_k == 4
-    assert settings.ollama_model == "qwen2.5:7b-instruct"
+    assert settings.ollama_model == "qwen3.5:4b"
 
 
 def test_keyword_arguments_override_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -439,6 +445,7 @@ def test_as_env_round_trips_through_the_environment(
     assert env["DATA_DIR"] == (tmp_path / "corpus").as_posix()
     assert env["CHROMA_DIR"] == "data/chroma_db"
     assert env["LLM_TEMPERATURE"] == "0.25"
+    assert env["OLLAMA_REASONING"] == "false"
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     assert Settings(_env_file=None) == settings

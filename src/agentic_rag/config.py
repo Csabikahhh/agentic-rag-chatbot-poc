@@ -97,9 +97,10 @@ class Settings(BaseSettings):
         "for an Ollama on the host seen from a container http://host.docker.internal:11434.",
     )
     ollama_model: str = Field(
-        default="qwen2.5:7b-instruct",
+        default="qwen3.5:4b",
         min_length=1,
-        description="Ollama chat model tag (provisional default, plan decision 4).",
+        description="Ollama chat model tag (plan decision 4, chosen by the evaluation and the "
+        "load test; run it with OLLAMA_REASONING=false).",
     )
     ollama_num_ctx: int = Field(
         default=8192,
@@ -117,6 +118,14 @@ class Settings(BaseSettings):
         description="Timeout in seconds of the HTTP client for each Ollama request "
         "(connecting, sending, and every wait for response data). Keep it generous: Ollama "
         "queues concurrent requests and may load the model before the first token.",
+    )
+    ollama_reasoning: bool = Field(
+        default=False,
+        description="Thinking mode of reasoning models such as Qwen3.5, sent as Ollama's "
+        "think option: false (the default) turns it off, true on. With thinking on, every LLM "
+        "call writes a long hidden reasoning first, which made Qwen3.5-4B about ten times "
+        "slower per question in the evaluation, without better answers. Models without a "
+        "thinking mode ignore it.",
     )
     llm_temperature: float = Field(
         default=0.0,
@@ -155,6 +164,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Number of chunks retrieved per query.",
     )
+    grade_with_llm: bool = Field(
+        default=True,
+        description="Let the chat model drop the retrieved chunks that do not help answer the "
+        "query (one extra LLM call per retrieval). Has no effect with the fake LLM provider.",
+    )
     max_retries: int = Field(
         default=2,
         ge=0,
@@ -162,7 +176,9 @@ class Settings(BaseSettings):
     )
     ingest_on_start: bool = Field(
         default=True,
-        description="Build the vector index at start-up when it is missing.",
+        description="At start-up (agentic-rag serve, the container's command), download the "
+        "missing corpus sources and bring the vector index up to date: build it when it is "
+        "missing, rebuild it when it was built with other embeddings.",
     )
     log_level: LogLevel = Field(
         default="INFO",
@@ -206,7 +222,8 @@ class Settings(BaseSettings):
 
         Returns:
             The upper-case variable name of every field, in declaration order, mapped to its
-            value as text: booleans as ``true`` or ``false``, paths with forward slashes.
+            value as text: booleans as ``true`` or ``false``, paths with forward slashes, and
+            an unset optional value as an empty text, which loads back as unset.
         """
         return {
             name.upper(): _format_env_value(getattr(self, name)) for name in type(self).model_fields
@@ -227,7 +244,9 @@ def _is_ipv4_address(value: str) -> bool:
 
 
 def _format_env_value(value: object) -> str:
-    """Format one setting the way it is written in a ``.env`` file."""
+    """Format one setting the way it is written in a ``.env`` file; None is an empty value."""
+    if value is None:
+        return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, PurePath):

@@ -6,6 +6,7 @@ The handlers import their target modules lazily. These tests put stand-in module
 
 import json
 import logging
+import signal
 import subprocess
 import sys
 import types
@@ -20,7 +21,7 @@ from agentic_rag import __version__, cli
 from agentic_rag.config import Settings
 from agentic_rag.errors import ConfigurationError, InvalidArgumentError, planned
 
-COMMANDS = ("ingest", "eval", "loadtest", "export-graph", "config")
+COMMANDS = ("ingest", "eval", "loadtest", "export-graph", "config", "serve")
 
 
 def install_module(
@@ -159,6 +160,16 @@ STUBS = [
 ]
 
 
+def install_runner(monkeypatch: pytest.MonkeyPatch, run_evaluation: Callable[..., Any]) -> None:
+    """Replace the evaluation runner module with one whose run_evaluation is given."""
+    install_module(
+        monkeypatch,
+        "agentic_rag.evaluation.runner",
+        run_evaluation=run_evaluation,
+        render_summary=str,
+    )
+
+
 def raising(error: BaseException) -> Callable[..., Any]:
     """A stand-in command target that raises ``error``."""
 
@@ -179,7 +190,8 @@ def test_planned_feature_prints_its_message_and_exits_with_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     error = planned(f"{module}.{function}", phase)
-    install_module(monkeypatch, module, **{function: raising(error)})
+    # render_summary is what eval prints; the other modules ignore the extra attribute.
+    install_module(monkeypatch, module, **{function: raising(error)}, render_summary=str)
 
     assert cli.main(argv) == 1
 
@@ -204,7 +216,7 @@ def test_planned_feature_prints_its_message_and_exits_with_1(
 def test_other_errors_of_a_command_propagate_with_their_traceback(
     error: Exception, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=raising(error))
+    install_runner(monkeypatch, raising(error))
 
     with pytest.raises(type(error)) as excinfo:
         cli.main(["eval"])
@@ -218,7 +230,7 @@ def test_a_validation_error_inside_a_command_is_not_a_configuration_error(
     def run_evaluation(settings: Settings, **kwargs: Any) -> Any:
         return Settings.model_validate({**settings.model_dump(), "top_k": 0})
 
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=run_evaluation)
+    install_runner(monkeypatch, run_evaluation)
 
     # Only the settings loaded at start-up are configuration; this one is a bug in the command.
     with pytest.raises(ValidationError):
@@ -230,7 +242,7 @@ def test_invalid_argument_error_is_reported_as_a_usage_error(
 ) -> None:
     message = "node 'verify_answer' cannot run from an evaluation item; choose analyze_request"
     error = InvalidArgumentError(message)
-    install_module(monkeypatch, "agentic_rag.evaluation.runner", run_evaluation=raising(error))
+    install_runner(monkeypatch, raising(error))
 
     assert cli.main(["eval", "--target", "node", "--node", "verify_answer"]) == 2
 
@@ -290,19 +302,150 @@ def test_ingest_passes_rebuild_and_prints_the_stats(
     ]
 
 
-def test_eval_forwards_its_options(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+class StandInDownloadError(RuntimeError):
+    """Stands in for agentic_rag.ingestion.download.DownloadError."""
+
+
+def test_ingest_download_fetches_the_sources_before_building_the_index(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    order: list[str] = []
+    sources = tmp_path / "sources.toml"
+    sources.write_text("", encoding="utf-8")
+
+    def download_sources(settings: Settings, *, sources_file: Path) -> None:
+        order.append(f"download {sources_file}")
+
+    def build_index(settings: Settings, *, rebuild: bool) -> Report:
+        order.append(f"build rebuild={rebuild}")
+        return Report(name="index", count=3)
+
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=download_sources,
+        DownloadError=StandInDownloadError,
+    )
+    install_module(monkeypatch, "agentic_rag.ingestion.index", build_index=build_index)
+
+    assert cli.main(["ingest", "--download", "--sources", str(sources), "--rebuild"]) == 0
+
+    assert order == [f"download {sources}", "build rebuild=True"]
+    assert json.loads(capsys.readouterr().out) == {"name": "index", "count": 3}
+
+
+def test_ingest_download_uses_the_repository_source_list_by_default(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Path] = []
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=lambda settings, *, sources_file: calls.append(sources_file),
+        DownloadError=StandInDownloadError,
+    )
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.index",
+        build_index=lambda settings, *, rebuild: Report(name="index", count=0),
+    )
+
+    # The tests run from the repository root, where data/sources.toml exists.
+    assert cli.main(["ingest", "--download"]) == 0
+
+    assert calls == [Path("data/sources.toml")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (
+            ["ingest", "--sources", "data/sources.toml"],
+            "--sources can only be used with --download",
+        ),
+        (["ingest", "--download", "--sources", "missing.toml"], "file not found: missing.toml"),
+    ],
+)
+def test_ingest_usage_errors(
+    argv: list[str], error: str, settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(argv) == 2
+
+    err = capsys.readouterr().err
+    assert "usage: agentic-rag ingest" in err
+    assert error in err
+
+
+def test_a_failed_download_prints_its_message_and_exits_with_1(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sources = tmp_path / "sources.toml"
+    sources.write_text("", encoding="utf-8")
+    error = StandInDownloadError("git is required to download the corpus")
+    install_module(
+        monkeypatch,
+        "agentic_rag.ingestion.download",
+        download_sources=raising(error),
+        DownloadError=StandInDownloadError,
+    )
+
+    assert cli.main(["ingest", "--download", "--sources", str(sources)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"agentic-rag ingest: {error}"
+    assert captured.out == ""
+
+
+def test_a_missing_corpus_prints_its_message_and_exits_with_1(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = FileNotFoundError("The corpus in data/raw has no documents")
+    install_module(monkeypatch, "agentic_rag.ingestion.index", build_index=raising(error))
+
+    assert cli.main(["ingest"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"agentic-rag ingest: {error}"
+    assert "Traceback" not in captured.err
+
+
+def test_ingest_builds_a_real_index_from_the_corpus(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (settings.data_dir / "guide.md").write_text("## Setup\n\nInstall it.\n", encoding="utf-8")
+
+    assert cli.main(["ingest"]) == 0
+
+    stats = json.loads(capsys.readouterr().out)
+    assert (stats["files"], stats["documents"], stats["chunks"]) == (1, 1, 1)
+    assert stats["embedding_provider"] == "fake"
+
+
+def test_eval_forwards_its_options_and_prints_the_summary(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     dataset = tmp_path / "questions.jsonl"
     dataset.write_text('{"question": "?"}\n', encoding="utf-8")
     calls: list[dict[str, Any]] = []
+    report = Report(name="eval", count=1)
     install_module(
         monkeypatch,
         "agentic_rag.evaluation.runner",
-        run_evaluation=recorder(calls, Report(name="eval", count=1)),
+        run_evaluation=recorder(calls, report),
+        render_summary=lambda report: f"# Summary of {report.name}\n",
     )
 
-    assert cli.main(["eval"]) == 0
+    assert cli.main(["eval", "--judge-model", "judge:7b"]) == 0
+    assert capsys.readouterr().out == "# Summary of eval\n"
     argv = ["eval", "--target", "node", "--node", "analyze_request"]
     argv += ["--dataset", str(dataset), "--output-dir", str(tmp_path / "out")]
     assert cli.main(argv) == 0
@@ -314,6 +457,7 @@ def test_eval_forwards_its_options(
             "node": None,
             "dataset_path": None,
             "output_dir": None,
+            "judge_model": "judge:7b",
         },
         {
             "settings": settings,
@@ -321,8 +465,31 @@ def test_eval_forwards_its_options(
             "node": "analyze_request",
             "dataset_path": dataset,
             "output_dir": tmp_path / "out",
+            "judge_model": None,
         },
     ]
+
+
+def test_eval_without_an_index_prints_its_message_and_exits_with_1(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The committed question set, in fake mode, but no index was built.
+    assert cli.main(["eval"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("agentic-rag eval: The vector index 'documents' does not exist")
+    assert "Traceback" not in captured.err
+
+
+def test_eval_reports_an_invalid_question_set_with_its_line(
+    settings: Settings, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dataset = tmp_path / "questions.jsonl"
+    dataset.write_text('{"id": "q1"}\n', encoding="utf-8")
+
+    assert cli.main(["eval", "--dataset", str(dataset)]) == 1
+
+    assert capsys.readouterr().err.startswith(f"agentic-rag eval: {dataset}:1: invalid item")
 
 
 @pytest.mark.parametrize(
@@ -332,6 +499,10 @@ def test_eval_forwards_its_options(
         (["eval", "--node", "analyze_request"], "only be used with --target node"),
         (["eval", "--dataset", "missing.jsonl"], "file not found"),
         (["eval", "--target", "everything"], "invalid choice"),
+        (
+            ["eval", "--target", "node", "--node", "analyze_request", "--judge-model", "x"],
+            "--judge-model can only be used with --target graph",
+        ),
     ],
 )
 def test_eval_usage_errors(
@@ -344,19 +515,26 @@ def test_eval_usage_errors(
     assert error in err
 
 
-def test_loadtest_forwards_its_options(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_loadtest_forwards_its_options_and_prints_the_summary(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[dict[str, Any]] = []
     install_module(
         monkeypatch,
         "agentic_rag.loadtest.runner",
         run_load_test=recorder(calls, Report(name="load", count=100)),
+        render_summary=lambda report: f"# Load test {report.name}\n",
     )
+    dataset = tmp_path / "questions.jsonl"
+    dataset.write_text("", encoding="utf-8")
 
     assert cli.main(["loadtest"]) == 0
+    assert capsys.readouterr().out == "# Load test load\n"
     argv = ["loadtest", "--requests", "50", "--concurrency", "8", "--warmup", "0"]
-    assert cli.main([*argv, "--output-dir", str(tmp_path)]) == 0
+    assert cli.main([*argv, "--output-dir", str(tmp_path), "--dataset", str(dataset)]) == 0
 
     assert calls == [
         {
@@ -365,6 +543,7 @@ def test_loadtest_forwards_its_options(
             "concurrency": 4,
             "warmup": 3,
             "output_dir": None,
+            "dataset_path": None,
         },
         {
             "settings": settings,
@@ -372,6 +551,7 @@ def test_loadtest_forwards_its_options(
             "concurrency": 8,
             "warmup": 0,
             "output_dir": tmp_path,
+            "dataset_path": dataset,
         },
     ]
 
@@ -455,6 +635,145 @@ def test_export_graph_raw_mermaid_needs_a_single_graph(
     assert "choose --graph agent or --graph rag" in capsys.readouterr().err
 
 
+# --- serve --------------------------------------------------------------------------------
+
+
+def serve_stand_ins(
+    monkeypatch: pytest.MonkeyPatch,
+    prepare: Callable[[Settings], Any] | None = None,
+    exit_code: int = 0,
+) -> tuple[list[Settings], list[list[str]]]:
+    """Replace the start-up preparation and the start of Streamlit for one ``serve`` run.
+
+    Returns:
+        The settings of every preparation and the command of every start, in call order.
+    """
+    prepared: list[Settings] = []
+    started: list[list[str]] = []
+
+    def prepare_knowledge_base(settings: Settings) -> None:
+        prepared.append(settings)
+        if prepare is not None:
+            prepare(settings)
+
+    def start(command: list[str]) -> int:
+        started.append(command)
+        return exit_code
+
+    install_module(
+        monkeypatch, "agentic_rag.ingestion.prepare", prepare_knowledge_base=prepare_knowledge_base
+    )
+    install_module(
+        monkeypatch, "agentic_rag.ingestion.download", DownloadError=StandInDownloadError
+    )
+    monkeypatch.setattr(cli, "_start", start)
+    return prepared, started
+
+
+def test_serve_prepares_the_knowledge_base_then_starts_the_ui(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, started = serve_stand_ins(monkeypatch)
+
+    assert cli.main(["serve", "--address", "0.0.0.0", "--port", "8600"]) == 0
+
+    assert prepared == [settings]
+    assert started == [
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(cli.UI_SCRIPT),
+            "--server.port=8600",
+            "--server.address=0.0.0.0",
+        ]
+    ]
+    assert cli.UI_SCRIPT.is_file()
+
+
+def test_serve_skips_the_preparation_when_ingest_on_start_is_off(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("INGEST_ON_START", "false")
+    prepared, started = serve_stand_ins(monkeypatch, exit_code=3)
+
+    assert cli.main(["serve"]) == 3  # The exit code of Streamlit.
+
+    assert prepared == []
+    assert started[0][-1] == "--server.port=8501"  # Streamlit's default address.
+
+
+def test_serve_starts_the_ui_when_the_preparation_fails(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _, started = serve_stand_ins(
+        monkeypatch, prepare=raising(StandInDownloadError("git fetch failed: no network"))
+    )
+
+    assert cli.main(["serve"]) == 0
+
+    assert len(started) == 1
+    (record,) = [
+        record
+        for record in caplog.records
+        if record.name == "agentic_rag.cli" and record.levelno == logging.ERROR
+    ]
+    assert record.getMessage().startswith(
+        "The knowledge base could not be prepared: git fetch failed: no network."
+    )
+
+
+def test_serve_lets_an_unexpected_preparation_error_propagate(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, started = serve_stand_ins(monkeypatch, prepare=raising(RuntimeError("bug")))
+
+    with pytest.raises(RuntimeError, match="bug"):
+        cli.main(["serve"])
+    assert started == []
+
+
+def test_sigterm_interrupts_the_preparation(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = signal.getsignal(signal.SIGTERM)
+    _, started = serve_stand_ins(
+        monkeypatch, prepare=lambda settings: signal.raise_signal(signal.SIGTERM)
+    )
+
+    assert cli.main(["serve"]) == 130  # What docker stop sends stops the preparation.
+
+    assert started == []
+    assert "Interrupted." in capsys.readouterr().err
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_serve_rejects_an_invalid_port(
+    settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["serve", "--port", "70000"]) == 2
+
+    assert "must be at most 65535, got 70000" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("replace_process", [True, False])
+def test_start_replaces_the_process_or_runs_a_child(
+    replace_process: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(cli, "_REPLACE_PROCESS", replace_process)
+    monkeypatch.setattr(cli.os, "execv", lambda path, args: calls.append(("execv", args)))
+    monkeypatch.setattr(cli.subprocess, "call", lambda args: calls.append(("call", args)) or 7)
+
+    result = cli._start(["python", "-m", "streamlit"])
+
+    if replace_process:
+        assert calls == [("execv", ["python", "-m", "streamlit"])]
+    else:
+        assert (calls, result) == ([("call", ["python", "-m", "streamlit"])], 7)
+
+
 # --- python -m agentic_rag in a fresh interpreter -----------------------------------------
 # What --help and config import is checked in test_imports.py.
 
@@ -522,6 +841,7 @@ def test_python_m_agentic_rag_exits_with_1_when_a_command_fails(
         f"    {raise_statement}\n"
         "runner = types.ModuleType('agentic_rag.evaluation.runner')\n"
         "runner.run_evaluation = run_evaluation\n"
+        "runner.render_summary = str\n"
         "sys.modules[runner.__name__] = runner\n"
         "sys.argv = ['agentic-rag', 'eval']\n"
         "runpy.run_module('agentic_rag', run_name='__main__')\n"

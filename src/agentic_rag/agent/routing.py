@@ -18,17 +18,13 @@ Routing functions are pure: they read the state (and, for the loop, the bound
 ``max_retries``), never call a model and never write to the state. LangGraph infers
 destinations only from a plain ``Literal`` return annotation and cannot see a ``Send``'s
 target, so ``build_agent_graph`` passes explicit path maps that match these annotations.
-
-Skeleton: every function raises ``agentic_rag.errors.PlannedFeatureError`` until Phase 4
-(plan section 8).
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from langgraph.types import Send
 
-from agentic_rag.agent.state import AgentState
-from agentic_rag.errors import planned
+from agentic_rag.agent.state import AgentState, SubtaskInput, SubtaskKind
 
 __all__ = [
     "SubtaskSends",
@@ -41,6 +37,11 @@ __all__ = [
 SubtaskWorker = Literal["run_rag_subtask", "call_tool"]
 """The nodes a ``Send`` can target: ``run_rag_subtask`` runs ``retrieve`` sub-tasks and
 ``call_tool`` runs ``tool`` sub-tasks."""
+
+_WORKERS: Final[dict[SubtaskKind, SubtaskWorker]] = {
+    "retrieve": "run_rag_subtask",
+    "tool": "call_tool",
+}
 
 SubtaskSends = Annotated[list[Send], SubtaskWorker]
 """A fan-out: one ``Send(worker, SubtaskInput(...))`` per sub-task, each to a SubtaskWorker.
@@ -63,18 +64,21 @@ def route_after_analyze(
     - ``tool``: one ``Send`` to ``call_tool``.
 
     For ``single`` and ``tool``, the one-step plan that ``analyze_request`` wrote to
-    ``subtasks`` is dispatched exactly as :func:`dispatch_subtasks` dispatches a plan.
+    ``subtasks`` is dispatched exactly as :func:`dispatch_subtasks` dispatches a plan. A
+    missing intent, or a ``single`` or ``tool`` intent without a plan, goes to the planner.
 
     Args:
         state: The graph state after ``analyze_request``.
 
     Returns:
         The next node, or the sends of the one-step plan.
-
-    Raises:
-        PlannedFeatureError: Always, until Phase 4.
     """
-    raise planned(f"{__name__}.route_after_analyze", 4)
+    intent = state.get("intent")
+    if intent == "direct":
+        return "finalize_response"
+    if intent in ("single", "tool") and state.get("subtasks"):
+        return dispatch_subtasks(state)
+    return "plan_subtasks"
 
 
 def dispatch_subtasks(state: AgentState) -> SubtaskSends:
@@ -92,11 +96,12 @@ def dispatch_subtasks(state: AgentState) -> SubtaskSends:
 
     Returns:
         One send per sub-task, in plan order.
-
-    Raises:
-        PlannedFeatureError: Always, until Phase 4.
     """
-    raise planned(f"{__name__}.dispatch_subtasks", 4)
+    question = state.get("question", "")
+    return [
+        Send(_WORKERS[subtask.kind], SubtaskInput(subtask=subtask, question=question))
+        for subtask in state.get("subtasks", [])
+    ]
 
 
 def route_after_verify(
@@ -120,8 +125,7 @@ def route_after_verify(
 
     Returns:
         The next node.
-
-    Raises:
-        PlannedFeatureError: Always, until Phase 4.
     """
-    raise planned(f"{__name__}.route_after_verify", 4)
+    if state.get("verdict") == "insufficient" and state.get("retry_count", 0) < max_retries:
+        return "plan_subtasks"
+    return "finalize_response"

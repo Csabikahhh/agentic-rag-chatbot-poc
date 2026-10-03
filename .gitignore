@@ -43,6 +43,11 @@ compose.override.yml
 # Jupyter
 .ipynb_checkpoints/
 
+# The corpus is downloaded by `agentic-rag ingest --download` (see data/sources.toml), not
+# committed; only the placeholder that keeps the directory in git is tracked.
+/data/raw/*
+!/data/raw/.gitkeep
+
 # Local model weights and vector stores. chroma_db/ matches at any depth:
 # CHROMA_DIR resolves against the working directory, so an index can appear
 # outside data/, and no source or corpus folder uses that name.

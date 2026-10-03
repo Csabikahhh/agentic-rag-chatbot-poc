@@ -5,16 +5,20 @@ The entrypoint (``app.py``) keeps the conversation in ``st.session_state`` as a 
 assistant turn has the same three parts, in this order (:func:`render_assistant_turn`):
 
 1. :func:`render_trace`: the main steps the agent took (node name, duration, summary) as a
-   collapsible step timeline. Steps whose time windows overlap, typically the parallel
-   ``Send`` workers of one planning round, are grouped into one "in parallel" step;
-   :func:`group_parallel_steps` describes which parallel workers this grouping misses.
+   collapsible step timeline. The steps that LangGraph ran in one step, the parallel ``Send``
+   workers of one planning round, are grouped into one "in parallel" step
+   (:func:`group_parallel_steps`). A worker that ran the RAG subgraph lists the subgraph's
+   steps under its own (:class:`AgentStep`): the rewritten search query, the retrieved and the
+   kept chunks.
 2. :func:`render_reply`: the answer, a notice when the run reached a part of the agent that is
-   planned for a later phase, a short notice when the user stopped the run, or the exception
-   when the run failed.
+   planned for a later phase, a short notice when the user stopped the run, or the failure:
+   what to do about it for the failures :func:`describe_failure` knows (a missing index, an
+   unreachable Ollama), the exception with its traceback for any other.
 3. :func:`render_sources`: the RAG result: every retrieved chunk with its source, title, page,
    section, score and text, collapsed by default.
 
-:func:`render_settings` shows the effective configuration in the sidebar.
+:func:`render_settings` shows the effective configuration in the sidebar, and
+:data:`EXAMPLE_QUESTIONS` are the questions the empty chat offers.
 
 Two helpers keep the history consistent for the agent: :func:`add_reply` puts an assistant
 turn right after the question it replies to, and :func:`agent_messages` builds the
@@ -32,8 +36,9 @@ escaped first (:func:`escape_dollar_signs`), so that currency amounts are not re
 
 import json
 import re
+import sys
 from collections.abc import Mapping, MutableSequence, Sequence
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import streamlit as st
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -42,15 +47,21 @@ from streamlit.delta_generator import DeltaGenerator
 
 from agentic_rag import __version__
 from agentic_rag.config import Settings
+from agentic_rag.errors import EmbeddingMismatchError, IndexNotFoundError
 from agentic_rag.rag.state import Source
-from agentic_rag.tracing import TraceEvent
+from agentic_rag.tracing import TraceEvent, trace_events_from_chunk
 
 __all__ = [
+    "EXAMPLE_QUESTIONS",
+    "AgentStep",
     "ChatTurn",
+    "FailureHint",
     "Role",
     "TraceState",
     "add_reply",
     "agent_messages",
+    "agent_steps_from_chunk",
+    "describe_failure",
     "escape_dollar_signs",
     "escape_markdown",
     "format_duration",
@@ -63,6 +74,17 @@ __all__ = [
     "render_turn",
     "settings_summary",
 ]
+
+EXAMPLE_QUESTIONS: Final = (
+    "Which CSS pseudo-class selects a parent element that contains a specific child?",
+    "Mi a különbség a React `useState` és a Nuxt `useState` között?",
+    "Is `#777777` text on a white background readable enough?",
+    "Which selector has the higher specificity: `#nav a` or `.menu li a`?",
+    "Is `:has()` supported in Safari 15?",
+)
+"""Questions the empty chat offers, one per route of the agent: a single search, a comparison
+that runs two searches in parallel (asked in Hungarian), and one question per tool (contrast,
+specificity, browser support). The fake LLM provider routes them the same way."""
 
 Role = Literal["user", "assistant"]
 """Author of a chat turn; also the name passed to ``st.chat_message``."""
@@ -102,6 +124,35 @@ _ATX_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
 _INLINE_TOKEN = re.compile(r"\\.|`+|\$", re.DOTALL)
 
 
+class AgentStep(BaseModel):
+    """One main step of an agent run, with the subgraph steps it ran.
+
+    Attributes:
+        event: The trace event that a node of the main graph recorded itself.
+        substeps: The events that the node forwarded from a subgraph, in execution order:
+            the RAG subgraph's steps for ``run_rag_subtask``, empty for the other nodes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    event: TraceEvent
+    substeps: list[TraceEvent] = Field(default_factory=list)
+
+
+class FailureHint(BaseModel):
+    """What a failure of the run means for the user, and what to do about it.
+
+    Attributes:
+        title: A short title, such as "Ollama is not reachable".
+        message: The explanation and the remedy, as Markdown.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str
+    message: str
+
+
 class ChatTurn(BaseModel):
     """One message of the conversation, as kept in ``st.session_state``.
 
@@ -109,28 +160,32 @@ class ChatTurn(BaseModel):
     agent run: the answer in ``content`` (Markdown), the main steps in ``trace`` and the
     retrieved chunks in ``sources``. A run that ends without an answer marks the turn
     instead: ``notice`` when the run reached a part of the agent that is planned for a later
-    phase, ``stopped`` when the user stopped it, ``error`` when it failed. ``trace`` then holds
-    the steps that finished before. Turns are immutable values.
+    phase, ``stopped`` when the user stopped it, ``error`` when it failed (with ``hint`` when
+    :func:`describe_failure` knows the failure). ``trace`` then holds the steps that finished
+    before. Turns are immutable values.
 
     Attributes:
         role: Author of the turn.
         content: The question, or the answer in Markdown; empty when there is no answer.
-        trace: The main steps of the run, as the graph nodes recorded them.
+        trace: The main steps of the run, in the order they finished.
         sources: The retrieved chunks behind the answer, in citation order.
         notice: Message of the ``PlannedFeatureError`` that ended the run.
         stopped: Whether the user stopped the run before it produced an answer.
         error: The exception that made the run fail.
+        hint: What ``error`` means and how to fix it, for a known failure; shown instead of
+            the traceback.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     role: Role
     content: str = ""
-    trace: list[TraceEvent] = Field(default_factory=list)
+    trace: list[AgentStep] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
     notice: str | None = None
     stopped: bool = False
     error: Exception | None = None
+    hint: FailureHint | None = None
 
     @property
     def answered(self) -> bool:
@@ -212,6 +267,82 @@ def add_reply(history: MutableSequence[ChatTurn], question: ChatTurn, reply: Cha
     history.insert(position, reply)
 
 
+def agent_steps_from_chunk(part: object) -> list[AgentStep]:
+    """Extract the main steps from one ``"updates"`` part of a ``version="v2"`` graph stream.
+
+    Each node's update carries the event the node recorded itself, after the events it
+    forwarded from a subgraph (see ``agentic_rag.tracing``). The node's own event becomes an
+    :class:`AgentStep` and the forwarded events its ``substeps``. Parts of other types, and
+    updates without an event of their own node, yield no steps.
+
+    Args:
+        part: One item of ``graph.stream(..., stream_mode=[...], version="v2")``.
+
+    Returns:
+        The main steps of the part, in the order of its updates.
+    """
+    if not isinstance(part, Mapping) or part.get("type") != "updates":
+        return []
+    data = part.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    steps: list[AgentStep] = []
+    for node, update in data.items():
+        events = trace_events_from_chunk({node: update})
+        forwarded = [event for event in events if event.node != node]
+        steps.extend(
+            AgentStep(event=event, substeps=forwarded) for event in events if event.node == node
+        )
+    return steps
+
+
+def describe_failure(error: BaseException, settings: Settings) -> FailureHint | None:
+    """Explain a failure that the user can fix, such as a missing index or a stopped Ollama.
+
+    Known failures, checked on the exception and on the exceptions it was raised from:
+
+    - ``IndexNotFoundError``: the knowledge base has not been built yet;
+    - ``EmbeddingMismatchError``: the index was built with other embeddings;
+    - with the ``ollama`` LLM provider, a connection to ``OLLAMA_BASE_URL`` that failed or
+      timed out (``httpx.ConnectError``, ``httpx.ConnectTimeout``), and a model that Ollama
+      does not have (``ollama.ResponseError`` with status 404).
+
+    The function imports nothing: the HTTP and Ollama clients can only have raised when they
+    are loaded, so it looks them up in ``sys.modules``.
+
+    Args:
+        error: The exception that made the run fail.
+        settings: The effective settings, for the Ollama URL and model in the remedy.
+
+    Returns:
+        The explanation, or None for any other failure, which keeps its traceback.
+    """
+    for cause in _causes(error):
+        if isinstance(cause, IndexNotFoundError):
+            return FailureHint(
+                title="The knowledge base has not been built yet",
+                message=(
+                    "The agent cannot search the documentation, because the vector index is "
+                    "missing. Build it with `agentic-rag ingest --download`, which also "
+                    "downloads the corpus, then ask again.\n\n"
+                    f"{escape_markdown(str(cause))}"
+                ),
+            )
+        if isinstance(cause, EmbeddingMismatchError):
+            return FailureHint(
+                title="The index does not match the embedding settings",
+                message=(
+                    f"{escape_markdown(str(cause))}\n\n"
+                    "After a rebuild, ask again; after a change of the settings, restart the app."
+                ),
+            )
+        if settings.llm_provider == "ollama":
+            hint = _describe_ollama_failure(cause, settings)
+            if hint is not None:
+                return hint
+    return None
+
+
 def render_turn(turn: ChatTurn) -> None:
     """Render one turn of the conversation as a chat message.
 
@@ -246,15 +377,18 @@ def render_assistant_turn(turn: ChatTurn) -> None:
 def render_reply(turn: ChatTurn) -> None:
     """Render the reply of an assistant turn.
 
-    By priority: the exception of a failed run with its traceback (``st.exception``), the
-    notice of a part of the agent that is not built yet, the notice of a run that the user
-    stopped, the answer as Markdown (with its dollar signs escaped, see
-    :func:`escape_dollar_signs`), or a warning when the run finished without an answer.
+    By priority: the failure of a run (its ``hint`` as an error message when the failure is a
+    known one, otherwise the exception with its traceback, ``st.exception``), the notice of a
+    part of the agent that is not built yet, the notice of a run that the user stopped, the
+    answer as Markdown (with its dollar signs escaped, see :func:`escape_dollar_signs`), or a
+    warning when the run finished without an answer.
 
     Args:
         turn: An assistant turn.
     """
-    if turn.error is not None:
+    if turn.error is not None and turn.hint is not None:
+        st.error(turn.hint.message, title=turn.hint.title, icon=":material/error:")
+    elif turn.error is not None:
         st.exception(turn.error)
     elif turn.notice is not None:
         st.info(
@@ -274,30 +408,35 @@ def render_reply(turn: ChatTurn) -> None:
         st.warning("The agent finished without an answer.", icon=":material/help:")
 
 
-def render_trace(events: Sequence[TraceEvent], *, state: TraceState = "complete") -> None:
+def render_trace(steps: Sequence[AgentStep], *, state: TraceState = "complete") -> None:
     """Render the main steps of an agent run as a collapsible step timeline.
 
-    The panel is a compact expander whose label sums up the run (the number of steps and the
-    wall-clock time) and whose icon shows the state. Inside, the steps follow each other in
-    the order they started, each with its node name and duration in the label and its
-    summary, start offset and metadata in the body. Steps whose time windows overlap form one
-    "in parallel" step with a table of them, so concurrent work stays readable; see
-    :func:`group_parallel_steps` for the parallel workers that this grouping misses.
+    The panel is a compact expander whose label sums up the run (the number of main steps and
+    the wall-clock time) and whose icon shows the state. Inside, the steps follow each other
+    in the order they started, each with its node name and duration in the label and its
+    summary, start offset and metadata in the body. The steps of one LangGraph step form one
+    "in parallel" step with a table of them (:func:`group_parallel_steps`). The subgraph steps
+    of a main step are listed in a table under it, or as indented rows under it in the table
+    of a parallel step.
 
-    Pass the events the nodes recorded themselves, as
-    ``trace_events_from_chunk(chunk, skip_forwarded=True)`` returns them: an event that a node
-    forwarded from a subgraph overlaps the node's own event and would be grouped with it.
+    The live panel is redrawn in place, and a redraw keeps the elements of the one before that
+    it does not overwrite. Two rules keep it from leaving any behind: every timeline step has
+    the same three elements (summary, details, table; empty placeholders where there is
+    nothing to show), and the timeline only grows, because a new step either starts a group
+    or joins the last one.
 
     Args:
-        events: Trace events in any order; may be empty.
+        steps: Main steps in any order, as :func:`agent_steps_from_chunk` returns them; may
+            be empty.
         state: ``"running"`` while the run is in progress: the panel is open, with a spinner
             and an animated label. ``"complete"`` after a run, ``"stopped"`` after a run that
             the user stopped and ``"error"`` after a failed run: the panel is collapsed, or
-            replaced by a short caption when there are no events.
+            replaced by a short caption when there are no steps.
     """
-    if not events and state != "running":
+    if not steps and state != "running":
         st.caption(":material/account_tree: No agent steps were recorded for this turn.")
         return
+    events = [step.event for step in steps]
     panel = st.expander(
         _trace_label(events, state),
         expanded=state == "running",
@@ -305,7 +444,7 @@ def render_trace(events: Sequence[TraceEvent], *, state: TraceState = "complete"
         type="compact",
     )
     origin = min(event.started_at for event in events) if events else 0.0
-    for group in group_parallel_steps(events):
+    for group in group_parallel_steps(steps):
         if len(group) == 1:
             _render_step(panel, group[0], origin)
         else:
@@ -359,7 +498,8 @@ def settings_summary(settings: Settings) -> dict[str, str]:
     Returns:
         Row labels (with a Material icon) mapped to Markdown values: the LLM provider and
         model, the Ollama URL (only for the ``ollama`` provider), the embedding provider and
-        model, and the retrieval depth (top-k).
+        model, the retrieval depth (top-k) and whether the LLM grades the retrieved chunks
+        (``GRADE_WITH_LLM``, which the fake LLM provider never does).
     """
     summary: dict[str, str] = {}
     if settings.llm_provider == "ollama":
@@ -374,40 +514,44 @@ def settings_summary(settings: Settings) -> dict[str, str]:
     else:
         summary[":material/scatter_plot: Embeddings"] = "`fake` · offline vectors, no model"
     summary[":material/format_list_numbered: Top-k"] = str(settings.top_k)
+    if settings.llm_provider == "fake":
+        grading = "off · not with the fake LLM"
+    else:
+        grading = "on" if settings.grade_with_llm else "off · score threshold only"
+    summary[":material/rule: LLM grading"] = grading
     return summary
 
 
-def group_parallel_steps(events: Sequence[TraceEvent]) -> list[list[TraceEvent]]:
-    """Order trace events by start time and group the ones whose time windows overlap.
+def group_parallel_steps(steps: Sequence[AgentStep]) -> list[list[AgentStep]]:
+    """Order main steps by start time and group the ones that LangGraph ran in parallel.
 
-    Two events overlap when one starts before the other ends. A group is a maximal run of
-    events that overlap each other, directly or through other events of the group. Events that
-    only touch (one starts exactly when the other ends) are sequential, and every sequential
-    step of the main workflow is a group of its own.
+    LangGraph runs a graph in steps (supersteps): the nodes of one step run in parallel, the
+    ``Send`` workers of one planning round for example, and the next step starts when they
+    have all finished. Every event records its step (``TraceEvent.step``), so the steps that
+    share one form a group, also when a fast worker, such as a pure-Python tool, finished
+    before the next one started. Each sequential step of the main workflow is a group of its
+    own.
 
-    The grouping sees wall-clock time only, not LangGraph's steps, so it finds the ``Send``
-    workers of one planning round only when their run times actually overlap. A worker that
-    finishes before the next one starts, such as a fast pure-Python tool that never releases
-    the GIL, shows as a sequential step of its own. The start offsets and durations stay
-    correct either way; only the "in parallel" grouping is missed. Grouping by LangGraph step
-    (``langgraph_step`` in the config metadata of each node) is left to Phase 5, when the UI is
-    checked against the real graph.
+    An event without a step (recorded outside a graph run) is grouped by time instead: with
+    the group before it when it starts before that group ends. Events that only touch (one
+    starts exactly when the other ends) are sequential.
 
     Args:
-        events: Trace events in any order.
+        steps: Main steps in any order.
 
     Returns:
-        The groups in chronological order. Inside a group, the events are ordered by start
+        The groups in chronological order. Inside a group, the steps are ordered by start
         time, then by end time.
     """
-    groups: list[list[TraceEvent]] = []
+    groups: list[list[AgentStep]] = []
     group_end = 0.0
-    for event in sorted(events, key=lambda item: (item.started_at, item.ended_at)):
-        if groups and event.started_at < group_end:
-            groups[-1].append(event)
+    for step in sorted(steps, key=lambda item: (item.event.started_at, item.event.ended_at)):
+        event = step.event
+        if groups and _same_round(groups[-1][-1].event, event, group_end):
+            groups[-1].append(step)
             group_end = max(group_end, event.ended_at)
         else:
-            groups.append([event])
+            groups.append([step])
             group_end = event.ended_at
     return groups
 
@@ -602,6 +746,52 @@ def _indent_width(line: str) -> int:
     return len(whitespace.expandtabs(4))
 
 
+def _causes(error: BaseException) -> list[BaseException]:
+    """Return the exception and the exceptions it was raised from (``__cause__``), in order."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and all(current is not seen for seen in chain):
+        chain.append(current)
+        current = current.__cause__
+    return chain
+
+
+def _describe_ollama_failure(error: BaseException, settings: Settings) -> FailureHint | None:
+    """Explain an Ollama server that cannot be reached or lacks the model, else return None."""
+    url, model = _inline_code(settings.ollama_base_url), _inline_code(settings.ollama_model)
+    pull = _inline_code(f"ollama pull {settings.ollama_model}")
+    httpx = sys.modules.get("httpx")
+    if httpx is not None and isinstance(error, httpx.ConnectError | httpx.ConnectTimeout):
+        try:
+            target = error.request.url
+        except RuntimeError:  # An error raised without a request.
+            return None
+        server = httpx.URL(settings.ollama_base_url)
+        if (target.host, target.port) != (server.host, server.port):
+            return None  # Another server, such as the Hugging Face Hub.
+        return FailureHint(
+            title="Ollama is not reachable",
+            message=(
+                f"The agent could not connect to Ollama at {url}. Start Ollama (`ollama serve`; "
+                "in the container stack, `docker compose up`), or set `OLLAMA_BASE_URL` to "
+                "where it runs and restart the app. Then ask again."
+            ),
+        )
+    ollama = sys.modules.get("ollama")
+    if ollama is not None and isinstance(error, ollama.ResponseError) and error.status_code == 404:
+        return FailureHint(
+            title="The model is not available",
+            message=(
+                f"Ollama at {url} does not have the model {model}. Pull it with {pull} (in "
+                "the container stack, the `ollama-pull` service pulls it), or set "
+                "`OLLAMA_MODEL` to a model that Ollama "
+                "has and restart the app. Then ask again.\n\n"
+                f"Ollama said: {escape_markdown(str(error.error))}"
+            ),
+        )
+    return None
+
+
 def _trace_state(turn: ChatTurn) -> TraceState:
     """Return the state of the step panel of a finished assistant turn."""
     if turn.error is not None:
@@ -611,30 +801,78 @@ def _trace_state(turn: ChatTurn) -> TraceState:
     return "complete"
 
 
-def _render_step(parent: DeltaGenerator, event: TraceEvent, origin: float) -> None:
+def _same_round(previous: TraceEvent, event: TraceEvent, group_end: float) -> bool:
+    """Return whether an event belongs to the group of the event that started before it."""
+    if previous.step is not None and event.step is not None:
+        return event.step == previous.step
+    return event.started_at < group_end
+
+
+def _render_step(parent: DeltaGenerator, step: AgentStep, origin: float) -> None:
     """Render one step of the timeline: node and duration in the label, details in the body."""
-    step = parent.expander(
+    event = step.event
+    body = parent.expander(
         f"{_inline_code(event.node)} · {format_duration(event.duration_ms)}",
         expanded=True,
         icon=":material/check_circle:",
         type="step",
     )
-    if event.summary:
-        step.markdown(escape_markdown(event.summary))
-    # A step without content would end the timeline, so the details line is always present.
     details = [f"Started at +{_offset(event, origin)}", *_metadata_items(event.metadata)]
-    step.caption(" · ".join(details))
+    entries = [(_inline_code(substep.node), substep) for substep in step.substeps]
+    _fill_step(body, event.summary, details, _step_rows(entries, origin))
 
 
 def _render_parallel_steps(
-    parent: DeltaGenerator, group: Sequence[TraceEvent], origin: float
+    parent: DeltaGenerator, group: Sequence[AgentStep], origin: float
 ) -> None:
-    """Render steps that ran at the same time as one timeline step with a table of them."""
-    with_details = any(event.metadata for event in group)
+    """Render the steps of one LangGraph step as one timeline step with a table of them."""
+    entries: list[tuple[str, TraceEvent]] = []
+    for step in group:
+        entries.append((_inline_code(step.event.node), step.event))
+        entries.extend((f"↳ {_inline_code(sub.node)}", sub) for sub in step.substeps)
+    events = [step.event for step in group]
+    body = parent.expander(
+        f"{len(group)} steps in parallel · {format_duration(_wall_ms(events))}",
+        expanded=True,
+        icon=":material/call_split:",
+        type="step",
+    )
+    details = [f"Started at +{_offset(events[0], origin)}"]
+    if events[0].step is not None:
+        details.append(f"LangGraph step {events[0].step}")
+    _fill_step(body, "", details, _step_rows(entries, origin))
+
+
+def _fill_step(
+    body: DeltaGenerator, summary: str, details: Sequence[str], rows: Sequence[dict[str, str]]
+) -> None:
+    """Fill the body of a timeline step with its three elements, always all three.
+
+    The summary, the details line and the table of the sub-steps or parallel steps, with an
+    empty placeholder for a missing summary or table. The live panel is redrawn as the steps
+    arrive, and a redrawn step keeps the elements of the earlier drawing that the new one does
+    not overwrite: with three elements every time, a step that becomes a parallel step (when
+    the second worker of its LangGraph step finishes) leaves nothing behind. The details line
+    is never empty, because a step without content would end the timeline.
+    """
+    if summary:
+        body.markdown(escape_markdown(summary))
+    else:
+        body.empty()
+    body.caption(" · ".join(details))
+    if rows:
+        body.table(rows, hide_index=True, border="horizontal")
+    else:
+        body.empty()
+
+
+def _step_rows(entries: Sequence[tuple[str, TraceEvent]], origin: float) -> list[dict[str, str]]:
+    """Build the table rows of steps from (label, event) pairs; Details only when needed."""
+    with_details = any(event.metadata for _, event in entries)
     rows: list[dict[str, str]] = []
-    for event in group:
+    for label, event in entries:
         row = {
-            "Step": _inline_code(event.node),
+            "Step": label,
             "Start": f"+{_offset(event, origin)}",
             "Duration": format_duration(event.duration_ms),
             "Summary": escape_markdown(event.summary),
@@ -642,13 +880,7 @@ def _render_parallel_steps(
         if with_details:
             row["Details"] = " · ".join(_metadata_items(event.metadata))
         rows.append(row)
-    step = parent.expander(
-        f"{len(group)} steps in parallel · {format_duration(_wall_ms(group))}",
-        expanded=True,
-        icon=":material/call_split:",
-        type="step",
-    )
-    step.table(rows, hide_index=True, border="horizontal")
+    return rows
 
 
 def _trace_label(events: Sequence[TraceEvent], state: TraceState) -> str:
@@ -681,9 +913,12 @@ def _metadata_items(metadata: Mapping[str, Any]) -> list[str]:
 
 
 def _format_value(value: Any) -> str:
-    """Format one metadata value: strings as they are, anything else as compact JSON."""
+    """Format one metadata value: strings as they are, floats with four significant digits,
+    anything else as compact JSON."""
     if isinstance(value, str):
         return value
+    if isinstance(value, float):
+        return f"{value:.4g}"
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
@@ -719,7 +954,14 @@ def _source_details(source: Source) -> str:
         details.append(f"Section: {escape_markdown(source.section)}")
     if source.page is not None:
         details.append(f"Page: {source.page}")
+    if source.url:
+        details.append(f"[Open the page]({_link_target(source.url)})")
     if source.score is not None:
         details.append(f"Score: {source.score:.3f}")
     details.append(f"Chunk: {_inline_code(source.chunk_id)}")
     return " · ".join(details)
+
+
+def _link_target(url: str) -> str:
+    """Encode the characters that would end a Markdown link target early."""
+    return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")

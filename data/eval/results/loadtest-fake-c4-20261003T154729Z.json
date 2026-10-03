@@ -1,0 +1,155 @@
+{
+  "created_at": "2026-10-03T15:47:29.438216Z",
+  "settings": {
+    "LLM_PROVIDER": "fake",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "qwen2.5:7b-instruct",
+    "OLLAMA_NUM_CTX": "8192",
+    "OLLAMA_TIMEOUT_S": "120.0",
+    "OLLAMA_REASONING": "",
+    "LLM_TEMPERATURE": "0.0",
+    "EMBEDDING_PROVIDER": "fake",
+    "EMBEDDING_MODEL": "intfloat/multilingual-e5-small",
+    "DATA_DIR": "data/raw",
+    "CHROMA_DIR": "C:/Users/OVARI~1.CSA/AppData/Local/Temp/claude/C--Users-ovari-csaba-Desktop-pwc-option1-agentic-rag-chatbot-poc/c677228b-c90e-476f-9f9e-9c8eb1351b8a/scratchpad/fake_chroma",
+    "CHROMA_COLLECTION": "documents",
+    "TOP_K": "4",
+    "GRADE_WITH_LLM": "true",
+    "MAX_RETRIES": "2",
+    "INGEST_ON_START": "true",
+    "LOG_LEVEL": "INFO"
+  },
+  "request_count": 100,
+  "concurrency": 4,
+  "warmup_count": 3,
+  "error_count": 0,
+  "duration_s": 1.32753586769104,
+  "latency": {
+    "count": 100,
+    "mean_ms": 52.68542766571045,
+    "min_ms": 0.9531974792480469,
+    "p50_ms": 7.369518280029297,
+    "p95_ms": 58.704376220703125,
+    "p99_ms": 1083.013598918915,
+    "max_ms": 1136.8122100830078
+  },
+  "node_latency": {
+    "analyze_request": {
+      "count": 100,
+      "mean_ms": 0.43396200228016824,
+      "min_ms": 0.3253000322729349,
+      "p50_ms": 0.42589998338371515,
+      "p95_ms": 0.5377850204240531,
+      "p99_ms": 0.5901499517494814,
+      "max_ms": 0.6148999673314393
+    },
+    "rewrite_query": {
+      "count": 82,
+      "mean_ms": 0.0006463407061812355,
+      "min_ms": 0.000400003045797348,
+      "p50_ms": 0.000600004568696022,
+      "p95_ms": 0.000800006091594696,
+      "p99_ms": 0.0016510125715285475,
+      "max_ms": 0.00400003045797348
+    },
+    "retrieve": {
+      "count": 82,
+      "mean_ms": 7.059659757055115,
+      "min_ms": 1.539300021249801,
+      "p50_ms": 4.670550028095022,
+      "p95_ms": 18.76420001790393,
+      "p99_ms": 28.18596098164562,
+      "max_ms": 28.624899976421148
+    },
+    "grade_documents": {
+      "count": 82,
+      "mean_ms": 0.002749996095123451,
+      "min_ms": 0.0019999570213258266,
+      "p50_ms": 0.002500019036233425,
+      "p95_ms": 0.004174973582848908,
+      "p99_ms": 0.009394955122843383,
+      "max_ms": 0.0097999582067132
+    },
+    "build_context": {
+      "count": 82,
+      "mean_ms": 0.020375608029298303,
+      "min_ms": 0.011899974197149277,
+      "p50_ms": 0.01680001150816679,
+      "p95_ms": 0.02386500709690154,
+      "p99_ms": 0.11975098343100389,
+      "max_ms": 0.1545000122860074
+    },
+    "run_rag_subtask": {
+      "count": 82,
+      "mean_ms": 8.210734147635266,
+      "min_ms": 2.604199980851263,
+      "p50_ms": 5.918050010222942,
+      "p95_ms": 20.07746995659545,
+      "p99_ms": 29.317248014267534,
+      "max_ms": 29.737800010479987
+    },
+    "synthesize_answer": {
+      "count": 94,
+      "mean_ms": 0.16950106649520866,
+      "min_ms": 0.12859998969361186,
+      "p50_ms": 0.1596500223968178,
+      "p95_ms": 0.2244300005258992,
+      "p99_ms": 0.29550002946052467,
+      "max_ms": 0.6117000011727214
+    },
+    "verify_answer": {
+      "count": 94,
+      "mean_ms": 0.34773085040951823,
+      "min_ms": 0.2478999667800963,
+      "p50_ms": 0.28899998869746923,
+      "p95_ms": 0.33524000900797535,
+      "p99_ms": 0.8294269675388588,
+      "max_ms": 5.5130000109784305
+    },
+    "finalize_response": {
+      "count": 100,
+      "mean_ms": 0.012867997866123915,
+      "min_ms": 0.008899951353669167,
+      "p50_ms": 0.012499978765845299,
+      "p95_ms": 0.016805011546239257,
+      "p99_ms": 0.018290964653715536,
+      "max_ms": 0.027300033252686262
+    },
+    "plan_subtasks": {
+      "count": 12,
+      "mean_ms": 0.34087499079760164,
+      "min_ms": 0.3074000123888254,
+      "p50_ms": 0.33214996801689267,
+      "p95_ms": 0.3971699974499643,
+      "p99_ms": 0.3983140061609447,
+      "max_ms": 0.3986000083386898
+    },
+    "call_tool": {
+      "count": 24,
+      "mean_ms": 174.47193332676156,
+      "min_ms": 0.14079996617510915,
+      "p50_ms": 0.15755000640638173,
+      "p95_ms": 1070.3755650058156,
+      "p99_ms": 1121.7983289761469,
+      "max_ms": 1134.1993999667466
+    }
+  },
+  "warmup_latency": {
+    "count": 3,
+    "mean_ms": 212.94323603312174,
+    "min_ms": 7.154941558837891,
+    "p50_ms": 9.238719940185547,
+    "p95_ms": 561.1163139343262,
+    "p99_ms": 610.1721000671387,
+    "max_ms": 622.4360466003418
+  },
+  "subgraph_nodes": [
+    "rewrite_query",
+    "retrieve",
+    "grade_documents",
+    "build_context"
+  ],
+  "error_samples": [],
+  "error_rate": 0.0,
+  "throughput_rps": 75.32753158219992
+}

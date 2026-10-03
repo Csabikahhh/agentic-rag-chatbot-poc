@@ -8,8 +8,8 @@ line.
 
 :func:`load_dataset` validates the whole file before it returns anything. A problem is
 reported as a :class:`DatasetError` that names the file and the 1-based line number, so a
-hand-written file is quick to fix. The 10-20 real questions are written in Phase 7, once the
-domain is chosen (plan decision 8).
+hand-written file is quick to fix. The committed set has 17 questions over the frontend
+documentation corpus (plan decision 8).
 
 Relative paths resolve against the current working directory, like the paths in
 ``Settings``: the repository root when running locally, ``/app`` in the container.

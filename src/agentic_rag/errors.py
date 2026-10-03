@@ -9,6 +9,8 @@ from typing import Final
 __all__ = [
     "PLAN_REFERENCE",
     "ConfigurationError",
+    "EmbeddingMismatchError",
+    "IndexNotFoundError",
     "InvalidArgumentError",
     "PlannedFeatureError",
     "planned",
@@ -28,10 +30,33 @@ class PlannedFeatureError(NotImplementedError):
 
 
 class ConfigurationError(ValueError):
-    """The settings could not be loaded, for example because ``.env`` is not valid UTF-8.
+    """The configuration cannot be used: the settings could not be loaded (for example
+    because ``.env`` is not valid UTF-8), a configuration file is invalid (``sources.toml``),
+    or the settings do not match the data they open (an index built with another embedding
+    model, ``EmbeddingMismatchError``).
 
     Invalid setting values raise ``pydantic.ValidationError`` instead; entry points handle
     both as a configuration problem (exit code 2 in the CLI).
+    """
+
+
+class EmbeddingMismatchError(ConfigurationError):
+    """The vector index was built with another embedding provider or model.
+
+    Raised by ``agentic_rag.ingestion.index`` (which re-exports it) when the index is opened.
+    Vectors of different models are not comparable, so the index has to be rebuilt with
+    ``agentic-rag ingest --rebuild``, or the settings have to match the index again. As a
+    ``ConfigurationError``, the CLI reports it with exit code 2; the UI explains it in the
+    assistant turn.
+    """
+
+
+class IndexNotFoundError(FileNotFoundError):
+    """The vector index has not been built yet.
+
+    Raised by ``agentic_rag.ingestion.index.load_index`` (which re-exports it). The message
+    names the directory and the collection and tells to run ``agentic-rag ingest``. As a
+    ``FileNotFoundError``, it is also caught by callers that only handle missing files.
     """
 
 

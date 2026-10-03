@@ -203,6 +203,7 @@ def test_traced_appends_the_event_to_a_new_dict() -> None:
     assert event.node == "node"
     assert before <= event.started_at <= event.ended_at <= after
     assert event.duration_ms >= 0
+    assert event.step is None  # Called outside a graph.
 
 
 def test_traced_measures_the_duration_with_perf_counter() -> None:
@@ -393,6 +394,7 @@ def test_traced_nodes_record_their_steps_in_a_graph() -> None:
     events = result["trace"]
     assert result["text"] == "ac"
     assert _names(events) == ["first", "second", "third"]
+    assert [event.step for event in events] == [1, 2, 3]  # LangGraph's langgraph_step
     assert all(event.duration_ms >= 0 for event in events)
     assert all(a.ended_at <= b.started_at for a, b in itertools.pairwise(events))
 
@@ -438,6 +440,9 @@ def test_traced_keeps_schema_inference_injection_and_partial_binding() -> None:
     assert result["text"] == "t1/u1/configured"
     assert sorted(result["items"]) == ["x", "y!"]
     assert Counter(_names(result["trace"])) == {"configured": 1, "worker": 1, "bound_worker": 1}
+    # The Send workers of one round share the LangGraph step after the one that sent them.
+    steps = {event.node: event.step for event in result["trace"]}
+    assert steps == {"configured": 1, "worker": 2, "bound_worker": 2}
 
 
 def test_traced_nodes_work_in_graphs_without_a_trace_key() -> None:

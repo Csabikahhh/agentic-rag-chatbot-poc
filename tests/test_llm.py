@@ -90,6 +90,7 @@ def test_ollama_provider_gives_chat_ollama_without_connecting() -> None:
         4096,
     )
     assert model.client_kwargs == {"timeout": 45.0}
+    assert model.reasoning is False  # Thinking off unless OLLAMA_REASONING=true.
 
 
 def test_get_chat_model_requires_explicit_settings() -> None:
@@ -174,6 +175,18 @@ def test_ollama_requests_send_the_context_window(
     assert [body["model"] for body in received] == ["tiny-model:1b"]
     # Without num_ctx in the options, Ollama would apply its own default context length.
     assert received[0]["options"]["num_ctx"] == 4096
+    assert received[0]["think"] is False  # OLLAMA_REASONING=false, the default.
+
+
+def test_ollama_requests_can_turn_thinking_on(
+    ollama_stand_in: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base_url, received = ollama_stand_in
+    model = get_chat_model(ollama_settings(base_url, ollama_reasoning=True))
+
+    model.invoke("Reply with the single word OK.")
+
+    assert received[0]["think"] is True
 
 
 def test_ollama_requests_time_out_after_the_configured_seconds(stalled_server: str) -> None:
@@ -212,6 +225,25 @@ def test_rules_see_every_message_of_the_prompt() -> None:
     assert model.invoke(messages).content == '{"intent": "complex"}'
     assert model.last_prompt == "ROUTER: classify the request.\n\nCompare A and B"
     assert render_prompt(messages) == model.last_prompt
+
+
+def test_an_expanding_rule_fills_in_the_groups_of_its_match() -> None:
+    rule = FakeRule(
+        pattern=r"contrast of (?P<fg>#\w+) on (?P<bg>#\w+)",
+        reply=r'{"foreground": "\g<fg>", "background": "\2"}',
+        expand=True,
+    )
+    model = ScriptedChatModel(rules=[rule])
+
+    assert model.invoke("the contrast of #777 on #fff").content == (
+        '{"foreground": "#777", "background": "#fff"}'
+    )
+
+
+def test_a_plain_rule_keeps_its_reply_literally() -> None:
+    model = scripted((r"(?P<word>\w+)", r"\g<word>"))
+
+    assert model.invoke("anything").content == r"\g<word>"
 
 
 def test_default_reply_is_deterministic_and_configurable() -> None:

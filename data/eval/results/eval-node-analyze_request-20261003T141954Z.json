@@ -1,0 +1,482 @@
+{
+  "created_at": "2026-10-03T14:19:54.665323Z",
+  "settings": {
+    "LLM_PROVIDER": "ollama",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",
+    "OLLAMA_NUM_CTX": "8192",
+    "OLLAMA_TIMEOUT_S": "120.0",
+    "LLM_TEMPERATURE": "0.0",
+    "EMBEDDING_PROVIDER": "huggingface",
+    "EMBEDDING_MODEL": "intfloat/multilingual-e5-small",
+    "DATA_DIR": "data/raw",
+    "CHROMA_DIR": "data/chroma_db",
+    "CHROMA_COLLECTION": "documents",
+    "TOP_K": "4",
+    "GRADE_WITH_LLM": "true",
+    "MAX_RETRIES": "2",
+    "INGEST_ON_START": "true",
+    "LOG_LEVEL": "INFO"
+  },
+  "target": "node",
+  "node": "analyze_request",
+  "dataset": "data/eval/questions.jsonl",
+  "judge_model": null,
+  "items": [
+    {
+      "item": {
+        "id": "q01",
+        "question": "Which CSS pseudo-class selects a parent element that contains a specific child?",
+        "reference_answer": "The :has() pseudo-class. It matches an element if any of the relative selectors passed to it matches at least one element anchored at that element, so section:has(.featured) selects the sections that contain a .featured element.",
+        "expected_documents": [
+          "mdn/web/css/reference/selectors/_colon_has/index.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "mdn"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 3198.5608999966644,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q02",
+        "question": "How do I add state to a React component?",
+        "reference_answer": "Call the useState Hook at the top level of the component, e.g. const [count, setCount] = useState(0). It returns the current state and a set function that updates it and triggers a re-render.",
+        "expected_documents": [
+          "react/reference/react/useState.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 728.0003000050783,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q03",
+        "question": "How do I declare a computed property with the Vue Composition API?",
+        "reference_answer": "Import computed from vue and pass it a getter function, e.g. const message = computed(() => ...). It returns a computed ref (read with .value, auto-unwrapped in templates) that is cached and recomputed only when its reactive dependencies change.",
+        "expected_documents": [
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "vue"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 774.9742000014521,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q04",
+        "question": "How do I create a dynamic route segment in the Next.js App Router?",
+        "reference_answer": "Wrap a folder name in square brackets, e.g. app/blog/[slug]/page.js, where [slug] is the dynamic segment; its value is passed to the page, layout or route handler in the params prop.",
+        "expected_documents": [
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "nextjs"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 855.1878000143915,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q05",
+        "question": "What does the useState composable do in Nuxt?",
+        "reference_answer": "It creates a reactive, SSR-friendly shared state identified by a unique key, e.g. useState('counter', () => 0). The value is shared between components and kept from server rendering to hydration; because it is serialized to JSON, it must not contain classes, functions or symbols.",
+        "expected_documents": [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 758.8885999866761,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q06",
+        "question": "What is a union type in TypeScript?",
+        "reference_answer": "A type formed from two or more other types, written with |, such as number | string; a value may be any one of the member types. Only operations valid for every member are allowed until the value is narrowed.",
+        "expected_documents": [
+          "typescript/handbook-v2/Everyday Types.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "typescript"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 668.0549000157043,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q07",
+        "question": "Hogyan kérek le adatot szerveroldalon Next.js App Routerben?",
+        "reference_answer": "Server Componentben: a komponenst async függvénnyé kell alakítani, és abban await-tel meghívni a fetch API-t (vagy egy ORM-et, adatbázist), pl. export default async function Page() { const data = await fetch(...) }.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "hungarian",
+          "nextjs"
+        ],
+        "notes": "The Hungarian question of plan section 12.6, which missed the Fetching Data page before the English query rewrite. Expected documents list every page that answers the question; the API reference pages were added after the first run retrieved them."
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 866.8927000253461,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q08",
+        "question": "Mire való a React useEffect hookja?",
+        "reference_answer": "A useEffect egy React Hook, amellyel a komponenst egy külső rendszerrel szinkronizáljuk (pl. hálózat, böngésző API, harmadik féltől származó widget): a setup függvény a renderelés után fut, a cleanup függvény pedig a függőségek változásakor és a komponens eltávolításakor.",
+        "expected_documents": [
+          "react/reference/react/useEffect.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "hungarian",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 721.6559000080451,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q09",
+        "question": "How do I fetch data on the server in Next.js and in Nuxt, and what is the difference?",
+        "reference_answer": "Next.js App Router: make a Server Component async and await fetch (or an ORM or database) in it. Nuxt: use the useFetch or useAsyncData composables (built on $fetch), which run on the server and forward the data to the client, so it is not fetched twice during hydration. The difference: Next.js fetches in async Server Components, Nuxt through composables in universal rendering.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nuxt/4.api/3.utils/$fetch.md",
+          "nuxt/4.api/2.composables/use-fetch.md",
+          "nuxt/4.api/2.composables/use-async-data.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "english",
+          "nextjs",
+          "nuxt"
+        ],
+        "notes": "Expected documents list every page that answers the question; the API reference pages were added after the first run retrieved them."
+      },
+      "answer": null,
+      "predicted_intent": "complex",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 745.0909000472166,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q10",
+        "question": "Mi a különbség a React useState és a Nuxt useState között?",
+        "reference_answer": "A React useState egy Hook, amely egy komponens saját állapotváltozóját adja vissza egy setter függvénnyel együtt ([state, setState]). A Nuxt useState egy kulccsal azonosított, SSR-barát, komponensek között megosztott reaktív állapot (ref), amely a szerveroldali renderelés után a kliensre is átkerül, ezért JSON-ba szerializálhatónak kell lennie.",
+        "expected_documents": [
+          "react/reference/react/useState.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "hungarian",
+          "react",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "complex",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 689.241599990055,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q11",
+        "question": "Is #777777 text on a white background readable enough for WCAG AA?",
+        "reference_answer": "The contrast ratio is 4.47:1. It fails WCAG AA for normal text (at least 4.5:1) and passes only for large text (at least 3:1); it also fails AAA.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "contrast"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 1258.746900013648,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q12",
+        "question": "Which selector has the higher specificity: `#nav a` or `.menu li a`?",
+        "reference_answer": "#nav a has specificity (1, 0, 1) and .menu li a has (0, 1, 2), so #nav a is more specific: one ID outweighs any number of classes and type selectors.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "specificity"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": false,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 927.8956000343896,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q13",
+        "question": "Is the :has() pseudo-class supported in Safari 15?",
+        "reference_answer": "No. Safari supports :has() from version 15.4, so Safari 15.0 does not support it.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "browser-support"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 1143.913900014013,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q14",
+        "question": "Működik a `:has()` szelektor a Firefox 115-ben?",
+        "reference_answer": "Nem. A Firefox a 121-es verziótól támogatja a :has() pszeudo-osztályt, így a 115-ös verzióban nem működik.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "hungarian",
+          "browser-support"
+        ],
+        "notes": null
+      },
+      "answer": null,
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 1444.4637999986298,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q15",
+        "question": "Melyik a nagyobb kontrasztú: fekete szöveg #f5f5f5 háttéren, vagy #595959 szöveg fehér háttéren? Megfelelnek a WCAG AA-nak?",
+        "reference_answer": "Fekete szöveg #f5f5f5 háttéren 19,26:1, #595959 szöveg fehér háttéren 7,0:1, tehát a fekete szöveg kontrasztja nagyobb. Mindkettő megfelel a WCAG AA-nak normál szövegnél is (legalább 4,5:1), sőt az AAA-nak (legalább 7:1) is.",
+        "expected_documents": [],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "tool",
+          "hungarian",
+          "contrast"
+        ],
+        "notes": "Two contrast checks in one question: the planner should run the tool twice."
+      },
+      "answer": null,
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": false,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 2107.2245000395924,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q16",
+        "question": "Hi! What can you help me with?",
+        "reference_answer": "A short greeting that offers help with web frontend development questions, answered from the MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, and with contrast, specificity and browser-support checks.",
+        "expected_documents": [],
+        "expected_intent": "direct",
+        "tags": [
+          "direct",
+          "english"
+        ],
+        "notes": null
+      },
+      "answer": "Hi! I can help with web frontend development questions using the MDN Web Docs, React, Vue, Next.js, Nuxt, and TypeScript documentation.",
+      "predicted_intent": "direct",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 1157.3395000305027,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q17",
+        "question": "What is the capital of France?",
+        "reference_answer": "The documentation does not cover this question; the assistant says so instead of answering from general knowledge.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "out-of-scope",
+          "english"
+        ],
+        "notes": "Routing is not checked: a refusal on the direct route and a search that finds nothing are both acceptable."
+      },
+      "answer": null,
+      "predicted_intent": "single",
+      "retrieved_documents": [],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": null,
+      "faithfulness": null,
+      "latency_ms": 630.996200023219,
+      "error": null
+    }
+  ],
+  "scores": {
+    "routing_accuracy": {
+      "mean": 0.875,
+      "count": 16
+    },
+    "hit_rate_at_k": {
+      "mean": null,
+      "count": 0
+    },
+    "answer_correctness": {
+      "mean": null,
+      "count": 0
+    },
+    "faithfulness": {
+      "mean": null,
+      "count": 0
+    }
+  },
+  "error_count": 0
+}

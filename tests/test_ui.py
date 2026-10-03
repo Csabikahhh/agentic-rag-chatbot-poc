@@ -1,11 +1,12 @@
 """Tests of the Streamlit UI: the entrypoint under AppTest and the components on their own.
 
-The app runs headless and offline with ``streamlit.testing.v1.AppTest`` in fake mode. The main
-graph module ``agentic_rag.agent.graph`` is replaced in ``sys.modules`` by stand-ins, so the
-tests do not depend on the real module (a stub until Phase 4): a builder that raises
-``PlannedFeatureError`` like the stub, one that raises an unexpected error, and builders that
-return small real LangGraph graphs on the project's state contracts. Some stand-in nodes press
-Stop the way the browser does, through the stop request of the script runner.
+The app runs headless and offline with ``streamlit.testing.v1.AppTest`` in fake mode. Most app
+tests replace the main graph module ``agentic_rag.agent.graph`` in ``sys.modules`` with
+stand-ins, which make each behaviour of the page easy to provoke: a builder that raises
+``PlannedFeatureError``, one that raises an unexpected error, and builders that return small
+real LangGraph graphs on the project's state contracts. Some stand-in nodes press Stop the way
+the browser does, through the stop request of the script runner. The tests at the end of the
+app section run the real main graph in fake mode, against an index of a small corpus.
 """
 
 import functools
@@ -37,13 +38,19 @@ from agentic_rag.agent.state import (
     SubtaskResult,
 )
 from agentic_rag.config import Settings
-from agentic_rag.errors import planned
+from agentic_rag.errors import EmbeddingMismatchError, IndexNotFoundError, planned
+from agentic_rag.ingestion.index import build_index
 from agentic_rag.rag.state import Source
 from agentic_rag.tracing import TraceEvent, epoch_now, traced
 from agentic_rag.ui.components import (
+    EXAMPLE_QUESTIONS,
+    AgentStep,
     ChatTurn,
+    FailureHint,
     add_reply,
     agent_messages,
+    agent_steps_from_chunk,
+    describe_failure,
     escape_dollar_signs,
     escape_markdown,
     format_duration,
@@ -201,12 +208,14 @@ def step_names(block: Any) -> list[str]:
     """Return the node names a step panel shows, in display order.
 
     ``block.status[0]`` is the panel itself; the other entries are its timeline steps. A
-    group of parallel workers lists its node names in a table.
+    group of parallel workers lists its node names in a table, where the indented rows (``↳``)
+    are the subgraph steps of the worker above them.
     """
     names: list[str] = []
     for step in block.status[1:]:
         if " in parallel" in step.label:
-            names.extend(cell.strip("`") for cell in step.table[0].value["Step"])
+            cells = step.table[0].value["Step"]
+            names.extend(cell.strip("`") for cell in cells if not cell.startswith("↳"))
         else:
             names.append(step.label.split(" · ")[0].strip("`"))
     return names
@@ -218,7 +227,13 @@ def message_texts(messages: Sequence[BaseMessage]) -> list[str]:
 
 
 def make_event(
-    node: str, start_ms: float, end_ms: float, summary: str = "", **metadata: Any
+    node: str,
+    start_ms: float,
+    end_ms: float,
+    summary: str = "",
+    *,
+    step: int | None = None,
+    **metadata: Any,
 ) -> TraceEvent:
     """Return a trace event that ran from ``start_ms`` to ``end_ms`` after ``T0``."""
     return TraceEvent(
@@ -228,7 +243,23 @@ def make_event(
         duration_ms=end_ms - start_ms,
         summary=summary,
         metadata=metadata,
+        step=step,
     )
+
+
+def make_step(
+    node: str,
+    start_ms: float,
+    end_ms: float,
+    summary: str = "",
+    *,
+    step: int | None = None,
+    substeps: Sequence[TraceEvent] = (),
+    **metadata: Any,
+) -> AgentStep:
+    """Return a main step whose own event ran from ``start_ms`` to ``end_ms`` after ``T0``."""
+    event = make_event(node, start_ms, end_ms, summary, step=step, **metadata)
+    return AgentStep(event=event, substeps=list(substeps))
 
 
 def press_stop() -> None:
@@ -247,11 +278,11 @@ def press_stop() -> None:
 # Scripts for AppTest.from_function: the body runs as a page, so it imports what it uses.
 
 
-def trace_panel_script(events: list, state: str) -> None:
+def trace_panel_script(steps: list, state: str) -> None:
     """Render one step panel."""
     from agentic_rag.ui.components import render_trace
 
-    render_trace(events, state=state)
+    render_trace(steps, state=state)
 
 
 def sources_panel_script(sources: list) -> None:
@@ -281,6 +312,12 @@ def raise_planned(settings: Settings) -> Any:
 def raise_runtime_error(settings: Settings) -> Any:
     """Fail the way an unexpected bug would."""
     raise RuntimeError("the index exploded")
+
+
+@traced
+def search_without_index(state: AgentState) -> dict[str, Any]:
+    """Fail like a search before the index was built."""
+    raise IndexNotFoundError("The vector index 'docs' does not exist in /tmp/chroma_db")
 
 
 @traced(summarize=lambda update: f"intent: {update['intent']}")
@@ -460,6 +497,7 @@ def test_sidebar_shows_ollama_settings_without_contacting_the_server(
         "`http://ollama.invalid:11434`",
         "`huggingface` · `intfloat/multilingual-e5-small`",
         "6",
+        "on",
     ]
     assert heavy_imports == []
 
@@ -576,22 +614,29 @@ def test_answer_shows_the_steps_the_reply_and_the_retrieved_context(
 
     assert not at.exception
     assistant = at.chat_message[1]
-    panel = assistant.status[0]
+    panel, *steps = assistant.status
     assert panel.icon == ":material/account_tree:"
     assert panel.label.startswith("Agent steps · 5 steps · ")
-    shown = step_names(assistant)
-    # The RAG subgraph event that run_rag_subtask forwards is not a main step. The workers in
-    # between may or may not be grouped as parallel, depending on whether their run times
-    # overlapped (see group_parallel_steps).
-    assert sorted(shown) == sorted(MAIN_STEPS)
-    assert (shown[:2], shown[-1]) == (MAIN_STEPS[:2], MAIN_STEPS[-1])
+    # The two workers ran in one LangGraph step, so they are grouped whatever their timing.
+    assert [step.label.split(" · ")[0] for step in steps] == [
+        "`analyze_request`",
+        "`plan_subtasks`",
+        "2 steps in parallel",
+        "`finalize_response`",
+    ]
+    assert sorted(step_names(assistant)) == sorted(MAIN_STEPS)
+    # The RAG subgraph event that run_rag_subtask forwards is a sub-step, not a main step.
+    workers = steps[2].table[0].value["Step"].tolist()
+    assert workers.index("↳ `retrieve`") == workers.index("`run_rag_subtask`") + 1
     assert "Answer 1 to *How many leave days?* [1]" in [md.value for md in assistant.markdown]
     (chunk,) = assistant.expander
     assert chunk.label == r"\[1\] Employee handbook · p. 12 · score 0.875"
     assert chunk.text[0].value == DEMO_SOURCE.content
     answer_turn = at.session_state[HISTORY_KEY][1]
     assert answer_turn.sources == [DEMO_SOURCE]
-    assert sorted(event.node for event in answer_turn.trace) == sorted(MAIN_STEPS)
+    assert sorted(step.event.node for step in answer_turn.trace) == sorted(MAIN_STEPS)
+    (worker,) = [step for step in answer_turn.trace if step.event.node == "run_rag_subtask"]
+    assert [substep.node for substep in worker.substeps] == ["retrieve"]
 
     ask(at, "And for part-time staff?")
 
@@ -632,7 +677,7 @@ def test_stopped_run_closes_its_question_and_later_runs_leave_it_out(
         True,
         "",
     )
-    assert [event.node for event in reply.trace] == ["analyze_request"]
+    assert [step.event.node for step in reply.trace] == ["analyze_request"]
 
     at.run()  # The next rerun shows the closed turn.
 
@@ -756,51 +801,204 @@ def test_unreadable_env_file_shows_an_error_instead_of_the_chat(
     assert not at.chat_input
 
 
+def test_known_failure_is_explained_without_a_traceback(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    install_graph_module(
+        monkeypatch, lambda settings: build_linear_graph(analyze_request, search_without_index)
+    )
+    at = start_app()
+
+    ask(at, "What does :has() select?")
+
+    assert not at.exception
+    assistant = at.chat_message[1]
+    (error,) = assistant.error
+    assert error.proto.title == "The knowledge base has not been built yet"
+    assert "`agentic-rag ingest --download`" in error.value
+    assert assistant.status[0].label.startswith("Agent steps before the error · 1 step · ")
+    (record,) = [record for record in caplog.records if record.name == "agentic_rag.ui.app"]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    reply = at.session_state[HISTORY_KEY][1]
+    assert isinstance(reply.error, IndexNotFoundError)
+    assert reply.hint is not None
+
+
+def test_empty_chat_offers_example_questions_that_ask_themselves(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_graph_module(monkeypatch, build_demo_graph)
+    at = start_app()
+
+    assert [button.label for button in at.main.button] == list(EXAMPLE_QUESTIONS)
+
+    at.main.button[2].click().run()
+
+    assert not at.exception
+    user, assistant = at.chat_message
+    assert user.text[0].value == EXAMPLE_QUESTIONS[2]
+    assert f"Answer 1 to *{EXAMPLE_QUESTIONS[2]}* [1]" in [md.value for md in assistant.markdown]
+    assert not at.main.button  # Offered only while the chat is empty.
+
+    at.run()
+
+    assert len(at.chat_message) == 2  # The example is asked once, not on every rerun.
+
+
+@pytest.fixture
+def indexed_settings(settings: Settings) -> Settings:
+    """Fake settings with a three-page corpus and its index, for the real main graph."""
+    pages = {
+        "nuxt.md": "---\ntitle: useState\n---\n\nThe Nuxt useState composable shares state.\n",
+        "react.md": "---\ntitle: useState\n---\n\nThe React useState Hook adds a state variable.\n",
+        "has.md": "---\ntitle: :has()\n---\n\nThe :has() pseudo-class selects a parent element.\n",
+    }
+    for name, text in pages.items():
+        (settings.data_dir / name).write_text(text, encoding="utf-8")
+    build_index(settings)
+    return settings
+
+
+def test_real_graph_answers_a_comparison_with_two_parallel_searches(
+    indexed_settings: Settings,
+) -> None:
+    at = start_app()
+
+    at.main.button[1].click().run()  # The comparison, asked in Hungarian.
+
+    assert not at.exception
+    assistant = at.chat_message[1]
+    panel, *steps = assistant.status
+    assert panel.label.startswith("Agent steps · 7 steps · ")
+    assert [step.label.split(" · ")[0] for step in steps] == [
+        "`analyze_request`",
+        "`plan_subtasks`",
+        "2 steps in parallel",
+        "`synthesize_answer`",
+        "`verify_answer`",
+        "`finalize_response`",
+    ]
+    # Every search lists the steps of the RAG subgraph under it.
+    rag_steps = ["rewrite_query", "retrieve", "grade_documents", "build_context"]
+    worker_rows = ["`run_rag_subtask`", *(f"↳ `{node}`" for node in rag_steps)]
+    assert steps[2].table[0].value["Step"].tolist() == worker_rows * 2
+    # Nothing is left of the live panel, which showed the first worker alone, with a summary
+    # and a table of its own, until the second one finished. (AppTest keeps the elements that
+    # a redraw does not overwrite, as the browser does.)
+    assert (len(steps[2].table), len(steps[2].caption), len(steps[2].markdown)) == (1, 1, 0)
+    assert steps[2].caption[0].value.endswith(" · LangGraph step 3")
+    assert any("scripted answer" in md.value for md in assistant.markdown)
+    assert ":material/library_books: Retrieved context · 3 chunks" in [
+        caption.value for caption in assistant.caption
+    ]
+    assert len(assistant.expander) == 3
+
+
+def test_real_graph_answers_a_tool_question_without_a_search(indexed_settings: Settings) -> None:
+    at = start_app()
+
+    at.main.button[2].click().run()  # The contrast of #777777 on white.
+
+    assert not at.exception
+    assistant = at.chat_message[1]
+    assert step_names(assistant) == [
+        "analyze_request",
+        "call_tool",
+        "synthesize_answer",
+        "verify_answer",
+        "finalize_response",
+    ]
+    assert any("4.47:1" in md.value for md in assistant.markdown)
+    assert assistant.caption[-1].value == (
+        ":material/description: No context was retrieved for this turn."
+    )
+
+
 # ---------------------------------------------------------------------------------------------
 # Components
 # ---------------------------------------------------------------------------------------------
 
 
 def test_render_trace_shows_steps_in_order_and_groups_parallel_workers() -> None:
-    events = [
-        make_event("finalize_response", 91, 92),
-        make_event("run_rag_subtask", 21, 80, "s1: 2 chunks", chunks=2),
-        make_event("analyze_request", 0, 10, "intent: complex"),
-        make_event("call_tool", 22, 25, "s2: 42"),
-        make_event("plan_subtasks", 11, 20, "2 sub-tasks"),
-        make_event("run_rag_subtask", 21, 90, "s3: 1 chunk", chunks=1),
+    rag_steps = [
+        make_event("rewrite_query", 22, 30, "Search query: x", step=1),
+        make_event("retrieve", 30, 31, "4 retrieved", step=2, top_score=0.876543),
+    ]
+    steps = [
+        make_step("finalize_response", 91, 92, step=4),
+        make_step("run_rag_subtask", 21, 80, "s1: 2 chunks", step=3, substeps=rag_steps),
+        make_step("analyze_request", 0, 10, "intent: complex", step=1),
+        make_step("call_tool", 22, 25, "s2: 42", step=3),
+        make_step("plan_subtasks", 11, 20, "2 sub-tasks", step=2),
+        make_step("run_rag_subtask", 21, 90, "s3: 1 chunk", step=3, chunks=1),
     ]
 
-    at = run_script(trace_panel_script, events, "complete")
+    at = run_script(trace_panel_script, steps, "complete")
 
     assert not at.exception
-    panel, *steps = at.status
+    panel, *timeline = at.status
     assert (panel.label, panel.icon, panel.proto.expanded) == (
         "Agent steps · 6 steps · 92 ms",
         ":material/account_tree:",
         False,
     )
-    assert [step.label for step in steps] == [
+    assert [step.label for step in timeline] == [
         "`analyze_request` · 10 ms",
         "`plan_subtasks` · 9.0 ms",
         "3 steps in parallel · 69 ms",
         "`finalize_response` · 1.0 ms",
     ]
-    assert steps[0].markdown[0].value == "intent: complex"
-    assert steps[0].caption[0].value == "Started at +0 ms"
-    assert steps[3].caption[0].value == "Started at +91 ms"
-    workers = steps[2].table[0].value
+    assert timeline[0].markdown[0].value == "intent: complex"
+    assert timeline[0].caption[0].value == "Started at +0 ms"
+    assert timeline[3].caption[0].value == "Started at +91 ms"
+    assert timeline[2].caption[0].value == "Started at +21 ms · LangGraph step 3"
+    assert not timeline[2].markdown
+    workers = timeline[2].table[0].value
+    # Each worker is followed by the subgraph steps it ran, indented.
     assert workers.to_dict("list") == {
-        "Step": ["`run_rag_subtask`", "`run_rag_subtask`", "`call_tool`"],
-        "Start": ["+21 ms", "+21 ms", "+22 ms"],
-        "Duration": ["59 ms", "69 ms", "3.0 ms"],
-        "Summary": ["s1: 2 chunks", "s3: 1 chunk", "s2: 42"],
-        "Details": ["chunks: 2", "chunks: 1", ""],
+        "Step": [
+            "`run_rag_subtask`",
+            "↳ `rewrite_query`",
+            "↳ `retrieve`",
+            "`run_rag_subtask`",
+            "`call_tool`",
+        ],
+        "Start": ["+21 ms", "+22 ms", "+30 ms", "+21 ms", "+22 ms"],
+        "Duration": ["59 ms", "8.0 ms", "1.0 ms", "69 ms", "3.0 ms"],
+        "Summary": ["s1: 2 chunks", "Search query: x", "4 retrieved", "s3: 1 chunk", "s2: 42"],
+        "Details": ["", "", "top\\_score: 0.8765", "chunks: 1", ""],
     }
 
 
+def test_render_trace_lists_the_subgraph_steps_of_a_single_worker() -> None:
+    rag_steps = [
+        make_event("rewrite_query", 11, 15, "Search query: css has", step=1),
+        make_event("build_context", 15, 16, "2 sources in the context", step=4),
+    ]
+    steps = [
+        make_step("analyze_request", 0, 10, step=1),
+        make_step("run_rag_subtask", 10, 20, "2 sources found", step=2, substeps=rag_steps),
+    ]
+
+    at = run_script(trace_panel_script, steps, "complete")
+
+    assert not at.exception
+    worker = at.status[2]
+    assert worker.label == "`run_rag_subtask` · 10 ms"
+    assert worker.markdown[0].value == "2 sources found"
+    assert worker.caption[0].value == "Started at +10 ms"
+    assert worker.table[0].value.to_dict("list") == {
+        "Step": ["`rewrite_query`", "`build_context`"],
+        "Start": ["+11 ms", "+15 ms"],
+        "Duration": ["4.0 ms", "1.0 ms"],
+        "Summary": ["Search query: css has", "2 sources in the context"],
+    }
+    assert not at.status[1].table  # A step without sub-steps has no table.
+
+
 def test_render_trace_live_panel_is_open_and_animated() -> None:
-    running = run_script(trace_panel_script, [make_event("analyze_request", 0, 5)], "running")
+    running = run_script(trace_panel_script, [make_step("analyze_request", 0, 5)], "running")
     starting = run_script(trace_panel_script, [], "running")
 
     panel = running.status[0]
@@ -822,9 +1020,9 @@ def test_render_trace_live_panel_is_open_and_animated() -> None:
     ],
 )
 def test_render_trace_marks_a_run_that_did_not_finish(state: str, title: str, icon: str) -> None:
-    event = make_event("analyze_request", 0, 5, "metadata `x`", attempt=1)
+    step = make_step("analyze_request", 0, 5, "metadata `x`", attempt=1)
 
-    at = run_script(trace_panel_script, [event], state)
+    at = run_script(trace_panel_script, [step], state)
 
     panel, step = at.status
     assert (panel.label, panel.icon) == (f"{title} · 1 step · 5.0 ms", icon)
@@ -873,6 +1071,27 @@ def test_render_sources_shows_every_chunk_collapsed_with_its_details() -> None:
     assert second.text[0].value == "Second *chunk*, verbatim."
 
 
+def test_render_sources_links_the_page_of_a_downloaded_source() -> None:
+    source = Source(
+        chunk_id="c1",
+        source="mdn/web/css/reference/selectors/_colon_has/index.md",
+        content=":has() CSS pseudo-class – MDN\n\nThe functional :has() pseudo-class ...",
+        title=":has() CSS pseudo-class – MDN",
+        url="https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has",
+    )
+
+    at = run_script(sources_panel_script, [source])
+
+    assert not at.exception
+    (expander,) = at.expander
+    assert expander.caption[0].value == (
+        "Source: `mdn/web/css/reference/selectors/_colon_has/index.md` · "
+        "Title: :has() CSS pseudo-class – MDN · "
+        "[Open the page](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has)"
+        " · Chunk: `c1`"
+    )
+
+
 def test_render_reply_escapes_the_dollar_signs_of_the_answer_outside_code() -> None:
     answer = "The fee is $25 and the late fee is $40; `echo $HOME` stays as it is."
 
@@ -889,14 +1108,30 @@ def test_render_reply_escapes_the_dollar_signs_of_the_answer_outside_code() -> N
 # ---------------------------------------------------------------------------------------------
 
 
-def test_group_parallel_steps_groups_overlapping_events_only() -> None:
-    first = make_event("first", 0, 10)
-    touching = make_event("touching", 10, 20)  # starts when `first` ends: sequential
-    long_worker = make_event("long_worker", 21, 40)
-    short_worker = make_event("short_worker", 25, 30)  # inside `long_worker`
-    late_worker = make_event("late_worker", 35, 50)  # overlaps `long_worker` only
-    chained = make_event("chained", 45, 60)  # overlaps `late_worker` only
-    last = make_event("last", 61, 62)
+def test_group_parallel_steps_groups_the_steps_of_one_langgraph_step() -> None:
+    plan = make_step("plan_subtasks", 0, 10, step=2)
+    # Two Send workers of one planning round whose run times did not overlap, as when a fast
+    # pure-Python tool returns before the next worker starts: still one group.
+    first_tool = make_step("call_tool", 20, 21, "s1: 42", step=3)
+    second_tool = make_step("call_tool", 21.5, 22, "s2: 7", step=3)
+    synthesize = make_step("synthesize_answer", 22, 30, step=4)
+    # A re-plan round runs later, in steps of its own.
+    replanned = make_step("call_tool", 40, 41, step=6)
+
+    groups = group_parallel_steps([replanned, synthesize, second_tool, first_tool, plan])
+
+    assert groups == [[plan], [first_tool, second_tool], [synthesize], [replanned]]
+    assert group_parallel_steps([]) == []
+
+
+def test_group_parallel_steps_groups_events_without_a_step_by_time() -> None:
+    first = make_step("first", 0, 10)
+    touching = make_step("touching", 10, 20)  # starts when `first` ends: sequential
+    long_worker = make_step("long_worker", 21, 40)
+    short_worker = make_step("short_worker", 25, 30)  # inside `long_worker`
+    late_worker = make_step("late_worker", 35, 50)  # overlaps `long_worker` only
+    chained = make_step("chained", 45, 60)  # overlaps `late_worker` only
+    last = make_step("last", 61, 62)
 
     groups = group_parallel_steps(
         [last, chained, late_worker, short_worker, long_worker, touching, first]
@@ -908,16 +1143,31 @@ def test_group_parallel_steps_groups_overlapping_events_only() -> None:
         [long_worker, short_worker, late_worker, chained],
         [last],
     ]
-    assert group_parallel_steps([]) == []
 
 
-def test_group_parallel_steps_sees_time_only_not_langgraph_steps() -> None:
-    # Two Send workers of one planning round whose run times did not overlap, as when a fast
-    # pure-Python tool returns before the next worker starts, show as sequential steps.
-    first_tool = make_event("call_tool", 20, 21, "s1: 42")
-    second_tool = make_event("call_tool", 21.5, 22, "s2: 7")
+def test_agent_steps_from_chunk_pairs_each_node_with_its_subgraph_steps() -> None:
+    forwarded = [make_event("rewrite_query", 1, 2, step=1), make_event("retrieve", 2, 3, step=2)]
+    worker = make_event("run_rag_subtask", 0, 4, step=3)
+    tool = make_event("call_tool", 0, 1, step=3)
+    part = {
+        "type": "updates",
+        "ns": (),
+        "data": {
+            "run_rag_subtask": {"subtask_results": [], "trace": [*forwarded, worker]},
+            "call_tool": {"trace": [tool]},
+            "__interrupt__": (),
+        },
+    }
 
-    assert group_parallel_steps([second_tool, first_tool]) == [[first_tool], [second_tool]]
+    assert agent_steps_from_chunk(part) == [
+        AgentStep(event=worker, substeps=forwarded),
+        AgentStep(event=tool),
+    ]
+    assert agent_steps_from_chunk({"type": "values", "ns": (), "data": {"trace": [tool]}}) == []
+    assert agent_steps_from_chunk({"run_rag_subtask": {"trace": [worker]}}) == []  # Not v2.
+    # An update that holds forwarded events only has no main step.
+    lone = {"type": "updates", "ns": (), "data": {"run_rag_subtask": {"trace": forwarded}}}
+    assert agent_steps_from_chunk(lone) == []
 
 
 @pytest.mark.parametrize(
@@ -1074,11 +1324,14 @@ def test_add_reply_puts_the_reply_right_after_its_question() -> None:
     assert [id(turn) for turn in history] == [id(turn) for turn in expected]
 
 
-def test_settings_summary_describes_providers_models_and_top_k(settings: Settings) -> None:
+def test_settings_summary_describes_providers_models_top_k_and_grading(
+    settings: Settings,
+) -> None:
     assert settings_summary(settings) == {
         ":material/smart_toy: LLM": "`fake` · scripted replies, no model",
         ":material/scatter_plot: Embeddings": "`fake` · offline vectors, no model",
         ":material/format_list_numbered: Top-k": "4",
+        ":material/rule: LLM grading": "off · not with the fake LLM",
     }
     local = Settings.model_validate(
         {
@@ -1089,8 +1342,80 @@ def test_settings_summary_describes_providers_models_and_top_k(settings: Setting
         }
     )
     assert settings_summary(local) == {
-        ":material/smart_toy: LLM": "`ollama` · `qwen2.5:7b-instruct`",
+        ":material/smart_toy: LLM": "`ollama` · `qwen3.5:4b`",
         ":material/lan: Ollama URL": "`http://localhost:11434`",
         ":material/scatter_plot: Embeddings": "`huggingface` · `intfloat/multilingual-e5-small`",
         ":material/format_list_numbered: Top-k": "8",
+        ":material/rule: LLM grading": "on",
     }
+    ungraded = Settings.model_validate({**local.model_dump(), "grade_with_llm": False})
+    assert settings_summary(ungraded)[":material/rule: LLM grading"] == (
+        "off · score threshold only"
+    )
+
+
+def test_describe_failure_explains_a_missing_or_mismatched_index(settings: Settings) -> None:
+    missing = IndexNotFoundError("The vector index 'docs' does not exist in data/chroma_db")
+    mismatch = EmbeddingMismatchError("Built with EMBEDDING_PROVIDER=fake; run --rebuild.")
+
+    assert describe_failure(missing, settings) == FailureHint(
+        title="The knowledge base has not been built yet",
+        message=(
+            "The agent cannot search the documentation, because the vector index is missing. "
+            "Build it with `agentic-rag ingest --download`, which also downloads the corpus, "
+            "then ask again.\n\nThe vector index 'docs' does not exist in data/chroma\\_db"
+        ),
+    )
+    hint = describe_failure(mismatch, settings)
+    assert hint is not None
+    assert hint.title == "The index does not match the embedding settings"
+    assert hint.message.startswith("Built with EMBEDDING\\_PROVIDER=fake; run --rebuild.\n\n")
+    # The exception the failure was raised from counts too.
+    try:
+        try:
+            raise missing
+        except IndexNotFoundError as exc:
+            raise RuntimeError("the search failed") from exc
+    except RuntimeError as wrapped:
+        assert describe_failure(wrapped, settings) == describe_failure(missing, settings)
+    assert describe_failure(RuntimeError("the index exploded"), settings) is None
+
+
+def test_describe_failure_explains_an_unreachable_ollama_or_a_missing_model(
+    settings: Settings,
+) -> None:
+    httpx = pytest.importorskip("httpx")
+    ollama = pytest.importorskip("ollama")
+    local = Settings.model_validate(
+        {**settings.model_dump(), "llm_provider": "ollama", "ollama_model": "qwen3:8b"}
+    )
+
+    def refused(url: str) -> Exception:
+        return httpx.ConnectError("refused", request=httpx.Request("POST", url))
+
+    unreachable = describe_failure(refused("http://localhost:11434/api/chat"), local)
+    assert unreachable is not None
+    assert unreachable.title == "Ollama is not reachable"
+    assert "`http://localhost:11434`" in unreachable.message
+    # Another server (here the Hugging Face Hub), or the fake provider: no Ollama hint.
+    assert describe_failure(refused("https://huggingface.co/api/models"), local) is None
+    assert describe_failure(refused("http://localhost:11434/api/chat"), settings) is None
+
+    not_pulled = ollama.ResponseError("model 'qwen3:8b' not found", 404)
+    hint = describe_failure(not_pulled, local)
+    assert hint is not None
+    assert hint.title == "The model is not available"
+    assert "`ollama pull qwen3:8b`" in hint.message
+    assert hint.message.endswith("Ollama said: model 'qwen3:8b' not found")
+    assert describe_failure(ollama.ResponseError("out of memory", 500), local) is None
+
+
+def test_render_reply_explains_a_known_failure_instead_of_the_traceback() -> None:
+    hint = FailureHint(title="Ollama is not reachable", message="Start `ollama serve`.")
+    turn = ChatTurn(role="assistant", error=ConnectionError("refused"), hint=hint)
+
+    at = run_script(reply_script, turn)
+
+    assert not at.exception
+    (error,) = at.error
+    assert (error.proto.title, error.value) == ("Ollama is not reachable", "Start `ollama serve`.")

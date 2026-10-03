@@ -2,8 +2,9 @@
 
 The percentile tests compare with hand-computed values of the documented method (linear
 interpolation between the closest ranks), with statistics.quantiles(method="inclusive") and,
-when it is installed, with numpy.percentile. Everything is pure and offline; the Phase 8 stub
-is checked for its planned-phase error and for the call signature that the CLI uses.
+when it is installed, with numpy.percentile. ``run_load_test`` runs offline: on the real graph
+in fake mode over a small indexed corpus, and on stand-in graphs that fail or track how many
+requests are in flight.
 """
 
 import inspect
@@ -11,6 +12,10 @@ import json
 import math
 import random
 import statistics
+import sys
+import threading
+import time
+import types
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,17 +24,20 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_rag.config import Settings
-from agentic_rag.errors import PlannedFeatureError, planned
+from agentic_rag.errors import InvalidArgumentError
+from agentic_rag.ingestion.index import build_index
 from agentic_rag.loadtest.runner import (
     LatencyStats,
     LoadTestReport,
     percentile,
+    render_summary,
     run_load_test,
     summarize_latencies,
     summarize_node_latencies,
+    write_report,
 )
 from agentic_rag.reports import RunReport
-from agentic_rag.tracing import TraceEvent
+from agentic_rag.tracing import TraceEvent, epoch_now
 
 
 def event(node: str, duration_ms: float, started_at: float = 1_000.0) -> TraceEvent:
@@ -353,19 +361,191 @@ def test_load_test_report_rejects_inconsistent_values(
         LoadTestReport(**report_fields(settings, **overrides))
 
 
-# --- run_load_test (Phase 8) -----------------------------------------------------------------
+# --- run_load_test ---------------------------------------------------------------------------
+
+QUESTIONS = [
+    {
+        "id": "q1",
+        "question": "Which pseudo-class selects a parent element?",
+        "reference_answer": "x",
+    },
+    {"id": "q2", "question": "Hi there!", "reference_answer": "x"},
+    {"id": "q3", "question": "React useState vs Nuxt useState", "reference_answer": "x"},
+]
 
 
-def test_run_load_test_is_planned_for_phase_8(settings: Settings, tmp_path: Path) -> None:
-    expected = str(planned("agentic_rag.loadtest.runner.run_load_test", 8))
+def write_questions(path: Path) -> Path:
+    """Write the three-question set and return its path."""
+    path.write_text("\n".join(json.dumps(item) for item in QUESTIONS) + "\n", encoding="utf-8")
+    return path
 
-    with pytest.raises(PlannedFeatureError) as caught:
-        run_load_test(settings, requests=50, concurrency=8, warmup=0, output_dir=tmp_path)
-    assert str(caught.value) == expected
 
-    with pytest.raises(PlannedFeatureError) as caught:
-        run_load_test(settings)
-    assert str(caught.value) == expected
+def install_graph(monkeypatch: pytest.MonkeyPatch, invoke: Any) -> None:
+    """Replace the main graph module with one whose graph answers through ``invoke``."""
+    module = types.ModuleType("agentic_rag.agent.graph")
+    module.build_agent_graph = lambda settings: types.SimpleNamespace(invoke=invoke)
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+
+def answered(node: str = "finalize_response", duration_ms: float = 1.0) -> dict[str, Any]:
+    """A graph output whose trace holds one event."""
+    now = epoch_now()
+    event = TraceEvent(
+        node=node, started_at=now, ended_at=now + duration_ms / 1000, duration_ms=duration_ms
+    )
+    return {"answer": "ok", "trace": [event]}
+
+
+def test_run_load_test_measures_the_real_graph_in_fake_mode(
+    settings: Settings, tmp_path: Path
+) -> None:
+    (settings.data_dir / "has.md").write_text(
+        "---\ntitle: :has()\n---\n\nThe :has() pseudo-class selects a parent element.\n",
+        encoding="utf-8",
+    )
+    build_index(settings)
+    output_dir = tmp_path / "results"
+
+    report = run_load_test(
+        settings,
+        requests=6,
+        concurrency=2,
+        warmup=1,
+        output_dir=output_dir,
+        dataset_path=write_questions(tmp_path / "questions.jsonl"),
+    )
+
+    assert (report.request_count, report.concurrency, report.warmup_count) == (6, 2, 1)
+    assert (report.error_count, report.latency.count, report.warmup_latency.count) == (0, 6, 1)
+    assert report.duration_s > 0
+    # Every request analyzes and finalizes; the searches ran the RAG subgraph.
+    assert report.node_latency["analyze_request"].count == 6
+    assert report.node_latency["finalize_response"].count == 6
+    assert report.node_latency["rewrite_query"].count > 0
+    assert report.subgraph_nodes == [
+        "rewrite_query",
+        "retrieve",
+        "grade_documents",
+        "build_context",
+    ]
+    (json_file,) = output_dir.glob("loadtest-fake-c2-*.json")
+    assert LoadTestReport.model_validate_json(json_file.read_text(encoding="utf-8")) == report
+    assert json_file.with_suffix(".md").read_text(encoding="utf-8") == render_summary(report)
+
+
+def test_run_load_test_counts_failed_requests_apart(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def invoke(state: dict[str, Any]) -> dict[str, Any]:
+        if state["messages"][0][1] == "Hi there!":
+            raise TimeoutError("the model did not answer")
+        return answered()
+
+    install_graph(monkeypatch, invoke)
+
+    report = run_load_test(
+        settings,
+        requests=6,
+        concurrency=3,
+        warmup=2,
+        output_dir=tmp_path,
+        dataset_path=write_questions(tmp_path / "questions.jsonl"),
+    )
+
+    # Warm-up: q1, q2 (q2 fails, so one warm-up sample); measured: q3, q1, q2, q3, q1, q2.
+    assert (report.warmup_count, report.warmup_latency.count) == (2, 1)
+    assert (report.error_count, report.latency.count) == (2, 4)
+    assert report.error_rate == pytest.approx(2 / 6)
+    assert report.error_samples == ["TimeoutError: the model did not answer"]
+    assert report.node_latency["finalize_response"].count == 4
+
+
+def test_run_load_test_keeps_at_most_concurrency_requests_in_flight(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = threading.Lock()
+    in_flight = peak = 0
+
+    def invoke(state: dict[str, Any]) -> dict[str, Any]:
+        nonlocal in_flight, peak
+        with lock:
+            in_flight += 1
+            peak = max(peak, in_flight)
+        time.sleep(0.02)
+        with lock:
+            in_flight -= 1
+        return answered()
+
+    install_graph(monkeypatch, invoke)
+
+    report = run_load_test(
+        settings,
+        requests=12,
+        concurrency=3,
+        warmup=0,
+        output_dir=tmp_path,
+        dataset_path=write_questions(tmp_path / "questions.jsonl"),
+    )
+
+    assert peak == 3
+    assert report.latency.count == 12
+    assert report.warmup_latency == LatencyStats(count=0)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"requests": 0}, {"concurrency": 0}, {"warmup": -1}],
+    ids=["no-requests", "no-concurrency", "negative-warmup"],
+)
+def test_run_load_test_rejects_invalid_counts(
+    settings: Settings, tmp_path: Path, options: dict[str, int]
+) -> None:
+    with pytest.raises(InvalidArgumentError, match="must be at least"):
+        run_load_test(settings, output_dir=tmp_path, **options)
+
+
+def test_run_load_test_rejects_an_empty_question_set(settings: Settings, tmp_path: Path) -> None:
+    empty = tmp_path / "questions.jsonl"
+    empty.write_text("\n", encoding="utf-8")
+
+    with pytest.raises(InvalidArgumentError, match="has no question"):
+        run_load_test(settings, output_dir=tmp_path, dataset_path=empty)
+
+
+def test_render_summary_orders_the_nodes_by_total_time(settings: Settings) -> None:
+    report = LoadTestReport(
+        created_at=datetime(2026, 10, 3, 12, 0, tzinfo=UTC),
+        settings=settings,
+        request_count=2,
+        concurrency=2,
+        warmup_count=1,
+        error_count=0,
+        duration_s=4.0,
+        latency=summarize_latencies([2000.0, 4000.0]),
+        node_latency={
+            "analyze_request": summarize_latencies([500.0, 700.0]),
+            "run_rag_subtask": summarize_latencies([1500.0, 1500.0, 2500.0]),
+            "rewrite_query": summarize_latencies([400.0, 400.0, 600.0]),
+        },
+        warmup_latency=summarize_latencies([9000.0]),
+        subgraph_nodes=["rewrite_query"],
+    )
+
+    summary = render_summary(report)
+
+    assert summary.startswith("# Load test: 2 requests, 2 at a time\n")
+    assert "throughput 0.500 requests/s (30.0 per minute), errors 0 (0%)" in summary
+    assert "| End to end (2 requests) | 3.00 s | 2.00 s | 3.00 s |" in summary
+    rows = [line for line in summary.splitlines() if line.startswith(("| `", "| ↳"))]
+    assert [row.split(" | ")[0] for row in rows] == [
+        "| `run_rag_subtask`",
+        "| ↳ `rewrite_query`",
+        "| `analyze_request`",
+    ]
+    assert rows[0].endswith("| 1.50 | 1.83 s | 1.50 s | 2.40 s | 2.50 s | 92% |")
+    assert write_report(report, Path(settings.data_dir) / "out").name == (
+        "loadtest-fake-c2-20261003T120000Z.json"
+    )
 
 
 def test_run_load_test_signature_matches_the_cli_call() -> None:
@@ -380,5 +560,6 @@ def test_run_load_test_signature_matches_the_cli_call() -> None:
         ("concurrency", inspect.Parameter.KEYWORD_ONLY, 4),
         ("warmup", inspect.Parameter.KEYWORD_ONLY, 3),
         ("output_dir", inspect.Parameter.KEYWORD_ONLY, None),
+        ("dataset_path", inspect.Parameter.KEYWORD_ONLY, None),
     ]
     assert signature.return_annotation is LoadTestReport

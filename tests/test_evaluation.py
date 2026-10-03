@@ -2,8 +2,9 @@
 
 Everything runs offline on temporary files and synthetic results. Invalid input is checked by
 its 1-based line, its field and Pydantic's stable error type, not by the wording of a library
-message. The Phase 7 stubs are checked for their planned-phase error, for the argument checks
-that run before it and for the call signature that the CLI uses.
+message. The judged metrics run on a scripted judge, and ``run_evaluation`` on the real graph
+and nodes in fake mode, over a small indexed corpus; the scoring of judged runs uses a
+stand-in for the graph, so that it needs no model either.
 """
 
 import codecs
@@ -11,7 +12,7 @@ import inspect
 import json
 import pickle
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,8 @@ from pydantic import ValidationError
 
 from agentic_rag.agent.types import Intent
 from agentic_rag.config import Settings
-from agentic_rag.errors import InvalidArgumentError, PlannedFeatureError, planned
+from agentic_rag.errors import IndexNotFoundError, InvalidArgumentError
+from agentic_rag.evaluation import runner
 from agentic_rag.evaluation.dataset import (
     DEFAULT_DATASET_PATH,
     DatasetError,
@@ -29,6 +31,9 @@ from agentic_rag.evaluation.dataset import (
     load_dataset,
 )
 from agentic_rag.evaluation.metrics import (
+    CORRECTNESS_INSTRUCTIONS,
+    FAITHFULNESS_INSTRUCTIONS,
+    JudgeError,
     JudgeScore,
     answer_correctness,
     faithfulness,
@@ -43,8 +48,13 @@ from agentic_rag.evaluation.runner import (
     EvalItemResult,
     EvalReport,
     MetricSummary,
+    render_summary,
     run_evaluation,
+    write_report,
 )
+from agentic_rag.ingestion.index import build_index
+from agentic_rag.ingestion.sources import MANIFEST_NAME
+from agentic_rag.llm import FakeRule, ScriptedChatModel
 from agentic_rag.reports import RESULTS_DIR, RunReport
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -375,27 +385,70 @@ def test_judge_score_lies_between_0_and_1(score: float) -> None:
         JudgeScore(score=score)
 
 
-# --- LLM-judged metrics (Phase 7) ------------------------------------------------------------
-
-JUDGED_METRICS: list[tuple[Callable[..., JudgeScore], tuple[Any, ...]]] = [
-    (answer_correctness, ("Question?", "Answer.", "Reference answer.")),
-    (faithfulness, ("Answer.", ["Context."])),
-]
+# --- LLM-judged metrics ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("metric", "args"), JUDGED_METRICS, ids=["correctness", "faithfulness"])
-def test_llm_judged_metrics_are_planned_for_phase_7(
-    metric: Callable[..., JudgeScore], args: tuple[Any, ...]
-) -> None:
-    from agentic_rag.llm import ScriptedChatModel
+def judge_replying(reply: str) -> ScriptedChatModel:
+    """A scripted judge that gives one structured reply to every prompt."""
+    return ScriptedChatModel(rules=[FakeRule(pattern="(?s).", reply=reply)])
 
-    judge = ScriptedChatModel()
 
-    with pytest.raises(PlannedFeatureError) as caught:
-        metric(*args, judge=judge)
+@pytest.mark.parametrize(
+    ("verdict", "score"),
+    [("correct", 1.0), ("partially_correct", 0.5), ("incorrect", 0.0)],
+)
+def test_answer_correctness_maps_the_verdict_to_a_score(verdict: str, score: float) -> None:
+    judge = judge_replying(json.dumps({"verdict": verdict, "rationale": " Same facts. "}))
 
-    assert str(caught.value) == str(planned(f"{metric.__module__}.{metric.__qualname__}", 7))
-    assert judge.prompts == ()
+    result = answer_correctness(
+        "What is :has()?", "A selector [1].", "A pseudo-class.", judge=judge
+    )
+
+    assert result == JudgeScore(score=score, rationale="Same facts.")
+    (prompt,) = judge.prompts
+    assert prompt.startswith(CORRECTNESS_INSTRUCTIONS)
+    assert prompt.endswith(
+        "Question:\nWhat is :has()?\n\nReference answer:\nA pseudo-class.\n\n"
+        "Answer to grade:\nA selector [1]."
+    )
+
+
+@pytest.mark.parametrize(
+    ("verdict", "score"),
+    [("supported", 1.0), ("partially_supported", 0.5), ("unsupported", 0.0)],
+)
+def test_faithfulness_checks_the_answer_against_every_context(verdict: str, score: float) -> None:
+    judge = judge_replying(json.dumps({"verdict": verdict, "rationale": "Backed."}))
+
+    result = faithfulness(
+        "The ratio is 4.47:1.", ["[1] Excerpt.\n", "  ", "Tool: 4.47:1"], judge=judge
+    )
+
+    assert result == JudgeScore(score=score, rationale="Backed.")
+    (prompt,) = judge.prompts
+    assert prompt.startswith(FAITHFULNESS_INSTRUCTIONS)
+    assert prompt.endswith(
+        "Material:\n[1] Excerpt.\n\n---\n\nTool: 4.47:1\n\nAnswer to check:\nThe ratio is 4.47:1."
+    )
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "not JSON",
+        json.dumps({"verdict": "maybe", "rationale": "?"}),
+        json.dumps({"verdict": "correct"}),
+    ],
+    ids=["not-json", "unknown-verdict", "no-rationale"],
+)
+def test_an_unreadable_verdict_raises_judge_error(reply: str) -> None:
+    with pytest.raises(JudgeError, match="could not be read"):
+        answer_correctness("Q?", "A.", "R.", judge=judge_replying(reply))
+
+
+def test_faithfulness_rejects_a_single_string_as_contexts() -> None:
+    with pytest.raises(TypeError, match="contexts must be a collection"):
+        faithfulness("A.", "one context", judge=judge_replying("{}"))
 
 
 # --- item results ----------------------------------------------------------------------------
@@ -526,22 +579,6 @@ def test_node_targets_are_the_main_graph_nodes_an_item_can_drive() -> None:
     assert sorted(NODE_TARGETS + NODES_WITHOUT_ITEM_INPUT) == sorted(NODE_NAMES)
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [{}, *({"target": "node", "node": node} for node in NODE_TARGETS)],
-    ids=["graph", *NODE_TARGETS],
-)
-def test_run_evaluation_is_planned_for_phase_7(
-    settings: Settings, tmp_path: Path, arguments: dict[str, Any]
-) -> None:
-    with pytest.raises(PlannedFeatureError) as caught:
-        run_evaluation(
-            settings, dataset_path=tmp_path / "questions.jsonl", output_dir=tmp_path, **arguments
-        )
-
-    assert str(caught.value) == str(planned("agentic_rag.evaluation.runner.run_evaluation", 7))
-
-
 @pytest.mark.parametrize("node", [*NODES_WITHOUT_ITEM_INPUT, "no_such_node", ""])
 def test_run_evaluation_rejects_a_node_that_an_item_cannot_drive(
     settings: Settings, node: str
@@ -578,8 +615,217 @@ def test_run_evaluation_signature_matches_the_cli_call() -> None:
         ("node", inspect.Parameter.KEYWORD_ONLY, None),
         ("dataset_path", inspect.Parameter.KEYWORD_ONLY, None),
         ("output_dir", inspect.Parameter.KEYWORD_ONLY, None),
+        ("judge_model", inspect.Parameter.KEYWORD_ONLY, None),
     ]
     assert signature.return_annotation is EvalReport
+
+
+# --- running the evaluation ------------------------------------------------------------------
+
+PAGES = {
+    "react/useState.md": "---\ntitle: useState\n---\n\nThe React useState Hook adds a state "
+    "variable to a component.\n",
+    "mdn/has.md": "---\ntitle: :has()\n---\n\nThe :has() pseudo-class selects a parent element "
+    "that contains a matching child.\n",
+}
+
+QUESTIONS = [
+    {
+        "id": "q01",
+        "question": "Which pseudo-class selects a parent element that contains a child?",
+        "reference_answer": "The :has() pseudo-class.",
+        "expected_documents": ["mdn/has.md"],
+        "expected_intent": "single",
+        "tags": ["english", "retrieval"],
+    },
+    {
+        "id": "q02",
+        "question": "Hi there!",
+        "reference_answer": "A greeting.",
+        "expected_intent": "direct",
+        "tags": ["english"],
+    },
+    {
+        "id": "q03",
+        "question": "React useState vs Nuxt useState",
+        "reference_answer": "Local state and shared state.",
+        "expected_documents": ["react/useState.md"],
+        "expected_intent": "complex",
+        "tags": ["retrieval"],
+    },
+]
+
+
+@pytest.fixture
+def evaluation_corpus(settings: Settings, tmp_path: Path) -> Path:
+    """Index two pages in fake mode and write a three-question set; return its path."""
+    for name, text in PAGES.items():
+        page = settings.data_dir / name
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(text, encoding="utf-8")
+    build_index(settings)
+    return write_lines(tmp_path / "questions.jsonl", *QUESTIONS)
+
+
+def test_run_evaluation_runs_the_graph_and_writes_the_report_and_its_summary(
+    settings: Settings, evaluation_corpus: Path, tmp_path: Path
+) -> None:
+    output_dir = tmp_path / "results"
+
+    report = run_evaluation(settings, dataset_path=evaluation_corpus, output_dir=output_dir)
+
+    assert (report.target, report.node, report.judge_model) == ("graph", None, None)
+    assert report.dataset == evaluation_corpus.as_posix()
+    first, greeting, comparison = report.items
+    assert (first.predicted_intent, first.intent_correct, first.hit_at_k) == ("single", True, True)
+    assert first.retrieved_documents[0][0] == "mdn/has.md"
+    assert first.answer and "[1]" in first.answer
+    assert (greeting.predicted_intent, greeting.hit_at_k, greeting.retrieved_documents) == (
+        "direct",
+        None,
+        [],
+    )
+    assert (comparison.predicted_intent, len(comparison.retrieved_documents)) == ("complex", 2)
+    # The fake LLM provider judges nothing.
+    assert all(r.answer_correctness is None and r.faithfulness is None for r in report.items)
+    assert report.scores.routing_accuracy == MetricSummary(mean=1.0, count=3)
+    assert report.error_count == 0
+    (json_file,) = output_dir.glob("eval-graph-*.json")
+    assert EvalReport.model_validate_json(json_file.read_text(encoding="utf-8")) == report
+    assert json_file.with_suffix(".md").read_text(encoding="utf-8") == render_summary(report)
+
+
+@pytest.mark.parametrize(
+    ("node", "intents", "hits"),
+    [
+        ("analyze_request", ["single", "direct", "complex"], [None, None, None]),
+        ("run_rag_subtask", [None, None, None], [True, None, True]),
+    ],
+)
+def test_run_evaluation_of_a_node_scores_only_what_the_node_produces(
+    settings: Settings,
+    evaluation_corpus: Path,
+    tmp_path: Path,
+    node: str,
+    intents: list[str | None],
+    hits: list[bool | None],
+) -> None:
+    report = run_evaluation(
+        settings,
+        target="node",
+        node=node,
+        dataset_path=evaluation_corpus,
+        output_dir=tmp_path,
+    )
+
+    assert [r.predicted_intent for r in report.items] == intents
+    assert [r.hit_at_k for r in report.items] == hits
+    assert report.scores.answer_correctness.count == 0
+    assert list(tmp_path.glob(f"eval-node-{node}-*.json"))
+
+
+def test_run_evaluation_judges_the_answers_with_the_judge_model(
+    settings: Settings, evaluation_corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ollama = Settings.model_validate({**settings.model_dump(), "llm_provider": "ollama"})
+    judged_with: list[str] = []
+    outcomes = {
+        QUESTIONS[0]["question"]: runner._Outcome(
+            answer="Use :has() [1].",
+            intent="single",
+            retrieved=[["mdn/has.md"]],
+            contexts=["[1] The :has() pseudo-class selects a parent element."],
+            grounded=True,
+        ),
+        QUESTIONS[1]["question"]: runner._Outcome(answer="Hello!", intent="direct"),
+    }
+
+    def run(question: str) -> runner._Outcome:
+        if question not in outcomes:
+            raise TimeoutError("no answer in time")
+        return outcomes[question]
+
+    def judge_model(settings: Settings, model: str) -> ScriptedChatModel:
+        judged_with.append(model)
+        return ScriptedChatModel(
+            rules=[
+                FakeRule(
+                    pattern="^You grade",
+                    reply=json.dumps({"verdict": "partially_correct", "rationale": "Half."}),
+                ),
+                FakeRule(
+                    pattern="^You check",
+                    reply=json.dumps({"verdict": "supported", "rationale": "Backed."}),
+                ),
+            ]
+        )
+
+    monkeypatch.setattr(runner, "_graph_runner", lambda settings: run)
+    monkeypatch.setattr(runner, "_judge_model", judge_model)
+
+    report = run_evaluation(
+        ollama, dataset_path=evaluation_corpus, output_dir=tmp_path, judge_model="judge:7b"
+    )
+
+    assert (report.judge_model, judged_with) == ("judge:7b", ["judge:7b"])
+    first, greeting, failed = report.items
+    assert first.answer_correctness == JudgeScore(score=0.5, rationale="Half.")
+    assert first.faithfulness == JudgeScore(score=1.0, rationale="Backed.")
+    # A direct reply (no search, no tool) is judged for correctness only.
+    assert (greeting.answer_correctness is not None, greeting.faithfulness) == (True, None)
+    # A failed question records its error and scores as a failure; the others still ran.
+    assert failed.error == "TimeoutError: no answer in time"
+    assert (failed.intent_correct, failed.hit_at_k, failed.answer_correctness) == (
+        False,
+        False,
+        None,
+    )
+    assert report.scores.answer_correctness == MetricSummary(mean=0.5, count=2)
+    assert report.scores.faithfulness == MetricSummary(mean=1.0, count=1)
+
+
+def test_an_answer_without_material_is_still_judged_for_faithfulness() -> None:
+    # A tool call that failed: the run used a tool, but the answer has nothing to rely on, so
+    # every number it states is unsupported.
+    item = EvalItem.model_validate(QUESTIONS[0])
+    outcome = runner._Outcome(answer="The ratio is about 1.75.", intent="tool", grounded=True)
+    judge = judge_replying(json.dumps({"verdict": "unsupported", "rationale": "No material."}))
+
+    result = runner._evaluate(item, lambda question: outcome, judge, target="graph", node=None, k=4)
+
+    assert result.faithfulness == JudgeScore(score=0.0, rationale="No material.")
+    assert "Material:\n(none)\n\nAnswer to check:\nThe ratio is about 1.75." in judge.prompts[-1]
+
+
+def test_run_evaluation_stops_when_the_index_is_missing(settings: Settings, tmp_path: Path) -> None:
+    dataset = write_lines(tmp_path / "questions.jsonl", *QUESTIONS)
+
+    with pytest.raises(IndexNotFoundError):
+        run_evaluation(settings, dataset_path=dataset, output_dir=tmp_path / "results")
+    assert not (tmp_path / "results").exists()
+
+
+def test_run_evaluation_rejects_an_empty_question_set(settings: Settings, tmp_path: Path) -> None:
+    dataset = write_lines(tmp_path / "questions.jsonl", "")
+
+    with pytest.raises(InvalidArgumentError, match="has no question"):
+        run_evaluation(settings, dataset_path=dataset, output_dir=tmp_path)
+
+
+def test_the_committed_question_set_covers_every_route_and_both_languages() -> None:
+    items = load_dataset(REPO_ROOT / DEFAULT_DATASET_PATH)
+
+    assert 10 <= len(items) <= 20
+    intents = {item.expected_intent for item in items}
+    assert {"direct", "single", "complex", "tool"} <= intents
+    assert any("hungarian" in item.tags for item in items)
+    assert any("out-of-scope" in item.tags for item in items)
+    # Checked against the sources that were downloaded: a fresh clone has only data/raw/.gitkeep.
+    corpus = REPO_ROOT / "data" / "raw"
+    for item in items:
+        for document in item.expected_documents:
+            if (corpus / document.split("/", 1)[0] / MANIFEST_NAME).is_file():
+                assert (corpus / document).is_file(), f"{item.id}: {document} is not in the corpus"
 
 
 # --- report ----------------------------------------------------------------------------------
@@ -631,6 +877,45 @@ def sample_report(settings: Settings) -> EvalReport:
         settings=settings,
         items=items,
     )
+
+
+def test_write_report_names_the_files_after_the_run_and_its_time(
+    settings: Settings, tmp_path: Path
+) -> None:
+    report = sample_report(settings)
+
+    json_file = write_report(report, tmp_path / "new")
+
+    assert json_file == tmp_path / "new" / "eval-graph-20261001T120000Z.json"
+    assert json_file.with_suffix(".md").is_file()
+    node_report = EvalReport.model_validate(
+        {**report.model_dump(), "target": "node", "node": "analyze_request", "items": []}
+    )
+    assert write_report(node_report, tmp_path).name == (
+        "eval-node-analyze_request-20261001T120000Z.json"
+    )
+
+
+def test_render_summary_shows_the_scores_every_question_and_the_errors(
+    settings: Settings,
+) -> None:
+    report = EvalReport.model_validate(
+        {**sample_report(settings).model_dump(), "judge_model": "judge:7b"}
+    )
+
+    summary = render_summary(report)
+
+    assert summary.startswith("# Evaluation of the full graph\n")
+    assert "3 questions, 1 failed" in summary
+    assert "LLM: fake; judge: `judge:7b`" in summary
+    assert "| Routing accuracy | 0.50 | 2 |" in summary
+    assert "| Retrieval hit@4 | 0.33 | 3 |" in summary
+    assert "| Answer correctness | 0.75 | 2 |" in summary
+    assert "| q01 |  | single → single ✓ | ✓ | 1.0 | 0.8 | 0.1 s |" in summary
+    assert "| q03 |  | – → – | ✗ | – | – | – |" in summary
+    assert "- **q01**: correctness 1.0: Matches the reference. · faithfulness 0.8: " in summary
+    assert summary.endswith("## Errors\n\n- **q03**: TimeoutError: no answer\n")
+    assert "## By tag" not in summary  # No tag is shared by two questions.
 
 
 def test_eval_report_computes_its_scores_from_the_applicable_items(settings: Settings) -> None:

@@ -1,10 +1,13 @@
-"""Load-test runner: latency statistics, the report model and ``run_load_test``.
+"""Load-test runner: ``run_load_test``, the latency statistics and the report model.
 
-Real already, and pure: :class:`LatencyStats` with :func:`summarize_latencies` and
-:func:`percentile`, the per-node aggregation :func:`summarize_node_latencies`, and
-:class:`LoadTestReport`, the format of the committed result files. ``run_load_test`` itself is
-planned for Phase 8. The records reject NaN and infinite numbers, so every report serializes
-to valid JSON and loads back unchanged.
+``agentic-rag loadtest`` calls :func:`run_load_test`, which sends the questions of the
+evaluation set to the compiled main graph from several threads and measures every request.
+The statistics are pure functions: :class:`LatencyStats` with :func:`summarize_latencies` and
+:func:`percentile`, and the per-node aggregation :func:`summarize_node_latencies`.
+:class:`LoadTestReport` is the format of the committed result files, and
+:func:`render_summary` its Markdown summary. The records reject NaN and infinite numbers, so
+every report serializes to valid JSON and loads back unchanged. Importing the module loads no
+LangGraph: ``run_load_test`` imports the agent when it runs.
 
 Percentile method: linear interpolation between the closest ranks. For ``n`` sorted samples
 ``x[0] <= ... <= x[n - 1]`` and a percentile ``q`` from 0 to 100, the position
@@ -16,7 +19,7 @@ with any of them. p50 is the ordinary median, p0 the minimum and p100 the maximu
 percentile of a small sample interpolates between the slowest requests: with 100 samples,
 p99 lies between the two slowest.
 
-What the statistics cover (the contract for Phase 8):
+What the statistics cover:
 
 - The latency of a request is the wall-clock time of one ``graph.invoke`` call of the
   compiled main graph, in milliseconds.
@@ -35,26 +38,39 @@ What the statistics cover (the contract for Phase 8):
 """
 
 import itertools
+import logging
 import math
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Self
+from typing import Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from agentic_rag.config import Settings
-from agentic_rag.errors import planned
-from agentic_rag.reports import RunReport
-from agentic_rag.tracing import TraceEvent
+from agentic_rag.errors import InvalidArgumentError
+from agentic_rag.evaluation.dataset import DEFAULT_DATASET_PATH, load_dataset
+from agentic_rag.reports import RESULTS_DIR, RunReport
+from agentic_rag.tracing import TraceEvent, epoch_now
 
 __all__ = [
+    "MAX_ERROR_SAMPLES",
     "LatencyStats",
     "LoadTestReport",
     "percentile",
+    "render_summary",
     "run_load_test",
     "summarize_latencies",
     "summarize_node_latencies",
+    "write_report",
 ]
+
+logger = logging.getLogger(__name__)
+
+MAX_ERROR_SAMPLES: Final = 5
+"""Distinct error messages a report keeps, so a broken run explains itself."""
 
 
 class LatencyStats(BaseModel):
@@ -124,6 +140,16 @@ class LoadTestReport(RunReport):
     )
     warmup_latency: LatencyStats = Field(
         description="End-to-end latency of the successful warm-up requests, reported apart."
+    )
+    subgraph_nodes: list[str] = Field(
+        default_factory=list,
+        description="The nodes in node_latency that ran inside run_rag_subtask (the RAG "
+        "subgraph), so their time is part of run_rag_subtask's.",
+    )
+    error_samples: list[str] = Field(
+        default_factory=list,
+        description="Up to MAX_ERROR_SAMPLES distinct error messages of failed requests, "
+        "most frequent first.",
     )
 
     @model_validator(mode="after")
@@ -241,31 +267,33 @@ def run_load_test(
     concurrency: int = 4,
     warmup: int = 3,
     output_dir: Path | None = None,
+    dataset_path: Path | None = None,
 ) -> LoadTestReport:
-    """Send queries to the compiled main graph under load and measure them (Phase 8).
-
-    Planned behaviour, with the details settled in Phase 8:
+    """Send queries to the compiled main graph under load and measure them.
 
     1. Build the main graph once with ``agentic_rag.agent.graph.build_agent_graph(settings)``
-       and take the questions of the evaluation set in turn.
-    2. Send the ``warmup`` requests and wait for them to finish. They are left out of every
-       measured number (``duration_s``, ``latency``, ``node_latency`` and the error count)
-       and summarized in ``warmup_latency`` instead, because the first Ollama request also
-       loads the model and would distort the percentiles.
+       and take the questions of the evaluation set in turn, so the load mixes searches,
+       comparisons, tool questions, a greeting and a question outside the topic as the set
+       does.
+    2. Send the ``warmup`` requests one after the other. They are left out of every measured
+       number (``duration_s``, ``latency``, ``node_latency`` and the error count) and
+       summarized in ``warmup_latency`` instead, because the first Ollama request also loads
+       the model and would distort the percentiles.
     3. Send the ``requests`` measured requests from a
        ``concurrent.futures.ThreadPoolExecutor(max_workers=concurrency)``, every task calling
-       ``graph.invoke``, so at most ``concurrency`` requests are in flight. Time every request
-       on the trace clock (``agentic_rag.tracing.epoch_now``) and keep its trace.
+       ``graph.invoke``, so at most ``concurrency`` requests are in flight. Every request is
+       timed on the trace clock (``agentic_rag.tracing.epoch_now``) and keeps its trace; a
+       failed request counts as an error and the run goes on.
     4. Build the report with :func:`summarize_latencies` and :func:`summarize_node_latencies`
-       and write it as JSON to ``output_dir``.
+       and write it with :func:`write_report`.
 
     Why threads and ``invoke`` rather than ``asyncio`` and ``ainvoke``: the nodes are
     synchronous functions, and under ``ainvoke`` LangGraph runs every one of them in a worker
-    thread anyway, a hop per node that no node's ``duration_ms`` contains. With ``invoke`` a request
-    takes the same synchronous path as in the UI and the evaluation. An Ollama call waits on
-    the network with the GIL released, so the threads overlap the way concurrent clients do;
-    in fake mode the work is pure Python and the threads share the GIL, so the fake baseline
-    shows the framework's own cost rather than a parallel speed-up. One run with
+    thread anyway, a hop per node that no node's ``duration_ms`` contains. With ``invoke`` a
+    request takes the same synchronous path as in the UI and the evaluation. An Ollama call
+    waits on the network with the GIL released, so the threads overlap the way concurrent
+    clients do; in fake mode the work is pure Python and the threads share the GIL, so the fake
+    baseline shows the framework's own cost rather than a parallel speed-up. One run with
     ``LLM_PROVIDER=fake`` and one with ``ollama`` separate the LLM's share of the latency from
     the rest of the system.
 
@@ -275,16 +303,201 @@ def run_load_test(
         concurrency: Maximum number of requests in flight at the same time, at least 1; the
             number of worker threads.
         warmup: Number of warm-up requests, sent first and reported separately; 0 or more.
-        output_dir: Directory for the JSON report; ``None`` means
+        output_dir: Directory for the report files; ``None`` means
             ``agentic_rag.reports.RESULTS_DIR``.
+        dataset_path: The questions to send; ``None`` means the evaluation set,
+            ``agentic_rag.evaluation.dataset.DEFAULT_DATASET_PATH``.
 
     Returns:
         The report, as written to ``output_dir``.
 
     Raises:
-        PlannedFeatureError: Always, until Phase 8.
+        InvalidArgumentError: If ``requests`` or ``concurrency`` is below 1, ``warmup`` is
+            negative, or the question set has no question.
+        FileNotFoundError: If the question set does not exist.
+        DatasetError: If a line of the question set is invalid.
     """
-    raise planned(f"{__name__}.run_load_test", 8)
+    if requests < 1 or concurrency < 1 or warmup < 0:
+        msg = (
+            "requests and concurrency must be at least 1 and warmup at least 0, got "
+            f"requests={requests}, concurrency={concurrency}, warmup={warmup}"
+        )
+        raise InvalidArgumentError(msg)
+    path = dataset_path or DEFAULT_DATASET_PATH
+    questions = [item.question for item in load_dataset(path)]
+    if not questions:
+        raise InvalidArgumentError(f"the question set {path} has no question")
+
+    # Imported here and not at the top: loading a committed report must not load LangGraph.
+    from agentic_rag.agent.graph import build_agent_graph
+    from agentic_rag.rag.graph import RAG_NODE_NAMES
+
+    graph = build_agent_graph(settings)
+    asked = itertools.cycle(questions)
+    logger.info(
+        "Load test: %d warm-up and %d measured requests, %d at a time, LLM_PROVIDER=%s",
+        warmup,
+        requests,
+        concurrency,
+        settings.llm_provider,
+    )
+    warmups = [_send(graph.invoke, next(asked)) for _ in range(warmup)]
+    batch = [next(asked) for _ in range(requests)]
+    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="loadtest") as pool:
+        measured = list(pool.map(lambda question: _send(graph.invoke, question), batch))
+
+    succeeded = [outcome for outcome in measured if outcome.error is None]
+    errors = Counter(outcome.error for outcome in measured if outcome.error is not None)
+    report = LoadTestReport(
+        settings=settings,
+        request_count=requests,
+        concurrency=concurrency,
+        warmup_count=warmup,
+        error_count=sum(errors.values()),
+        duration_s=max(o.ended_at for o in measured) - min(o.started_at for o in measured),
+        latency=summarize_latencies([outcome.latency_ms for outcome in succeeded]),
+        node_latency=summarize_node_latencies(outcome.trace for outcome in succeeded),
+        warmup_latency=summarize_latencies(
+            [outcome.latency_ms for outcome in warmups if outcome.error is None]
+        ),
+        subgraph_nodes=list(RAG_NODE_NAMES),
+        error_samples=[message for message, _ in errors.most_common(MAX_ERROR_SAMPLES)],
+    )
+    write_report(report, output_dir or RESULTS_DIR)
+    return report
+
+
+def write_report(report: LoadTestReport, output_dir: Path) -> Path:
+    """Write a report as JSON and its Markdown summary next to it.
+
+    The file name holds the LLM provider, the concurrency and the UTC time the run finished,
+    so runs never overwrite each other: ``loadtest-ollama-c4-20261003T120000Z.json``, and the
+    same name with ``.md`` for :func:`render_summary`.
+
+    Args:
+        report: The report to write.
+        output_dir: The directory; created when missing.
+
+    Returns:
+        The path of the JSON file.
+    """
+    stamp = report.created_at.strftime("%Y%m%dT%H%M%SZ")
+    provider = report.settings.get("LLM_PROVIDER", "unknown")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / f"loadtest-{provider}-c{report.concurrency}-{stamp}.json"
+    json_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
+    summary_path = json_path.with_suffix(".md")
+    summary_path.write_text(render_summary(report), encoding="utf-8", newline="\n")
+    logger.info("Wrote %s and %s", json_path, summary_path)
+    return json_path
+
+
+def render_summary(report: LoadTestReport) -> str:
+    """Summarize a load-test report as Markdown: the run, the latencies, every node.
+
+    The node table is ordered by the node's total time in the successful requests, the
+    largest first, and gives each node's executions per request and its share of the summed
+    request time. The share of a node that ran in parallel with another, or inside
+    ``run_rag_subtask`` (the subgraph nodes, marked), overlaps, so the shares do not add up
+    to 100 %.
+
+    Args:
+        report: The report to summarize.
+
+    Returns:
+        The Markdown text, ending with a newline.
+    """
+    settings = report.settings
+    llm = settings.get("LLM_PROVIDER", "?")
+    if llm == "ollama":
+        llm += f" `{settings.get('OLLAMA_MODEL', '?')}`"
+        if settings.get("OLLAMA_REASONING"):
+            llm += f", OLLAMA_REASONING={settings['OLLAMA_REASONING']}"
+    succeeded = report.latency.count
+    lines = [
+        f"# Load test: {report.request_count} requests, {report.concurrency} at a time",
+        "",
+        f"- Run: {report.created_at:%Y-%m-%d %H:%M} UTC, {report.warmup_count} warm-up requests "
+        f"before the measured ones",
+        f"- LLM: {llm}; embeddings: {settings.get('EMBEDDING_PROVIDER', '?')}; "
+        f"TOP_K={settings.get('TOP_K', '?')}; GRADE_WITH_LLM={settings.get('GRADE_WITH_LLM', '?')}",
+        f"- Duration {report.duration_s:.1f} s, throughput {report.throughput_rps:.3f} requests/s "
+        f"({report.throughput_rps * 60:.1f} per minute), "
+        f"errors {report.error_count} ({report.error_rate:.0%})",
+        "",
+        "| Latency | Mean | Min | p50 | p95 | p99 | Max |",
+        "|---|---|---|---|---|---|---|",
+        _latency_row(f"End to end ({succeeded} requests)", report.latency),
+        _latency_row(f"Warm-up ({report.warmup_latency.count})", report.warmup_latency),
+    ]
+    request_time = (report.latency.mean_ms or 0.0) * succeeded
+    totals = {
+        node: (stats.mean_ms or 0.0) * stats.count for node, stats in report.node_latency.items()
+    }
+    lines += [
+        "",
+        "## Per node",
+        "",
+        "| Node | Runs per request | Mean | p50 | p95 | Max | Share of request time |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for node, total in sorted(totals.items(), key=lambda item: item[1], reverse=True):
+        stats = report.node_latency[node]
+        name = f"↳ `{node}`" if node in report.subgraph_nodes else f"`{node}`"
+        share = f"{total / request_time:.0%}" if request_time else "–"
+        lines.append(
+            f"| {name} | {stats.count / succeeded if succeeded else 0:.2f} | "
+            f"{_ms(stats.mean_ms)} | {_ms(stats.p50_ms)} | {_ms(stats.p95_ms)} | "
+            f"{_ms(stats.max_ms)} | {share} |"
+        )
+    if report.subgraph_nodes:
+        lines += [
+            "",
+            "↳ marks the RAG subgraph's nodes: their time is part of `run_rag_subtask`'s. "
+            "Parallel workers overlap, so the shares do not add up to 100 %.",
+        ]
+    if report.error_samples:
+        lines += ["", "## Errors", "", *(f"- {message}" for message in report.error_samples)]
+    return "\n".join(lines) + "\n"
+
+
+@dataclass
+class _Outcome:
+    """One request of the load test: when it ran, its trace, or why it failed."""
+
+    started_at: float
+    ended_at: float
+    trace: list[TraceEvent] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def latency_ms(self) -> float:
+        """Wall-clock time of the request in milliseconds."""
+        return (self.ended_at - self.started_at) * 1000.0
+
+
+def _send(invoke: Callable[[dict[str, object]], dict[str, object]], question: str) -> _Outcome:
+    """Send one question to the graph and time it; a failure is recorded, not raised."""
+    started = epoch_now()
+    try:
+        output = invoke({"messages": [("user", question)]})
+    except Exception as exc:
+        logger.warning("A load-test request failed: %s", exc)
+        return _Outcome(started, epoch_now(), error=f"{type(exc).__name__}: {exc}")
+    ended = epoch_now()
+    trace = output.get("trace", [])
+    return _Outcome(started, ended, trace=list(trace) if isinstance(trace, list) else [])
+
+
+def _latency_row(label: str, stats: LatencyStats) -> str:
+    """One row of the latency table."""
+    values = (stats.mean_ms, stats.min_ms, stats.p50_ms, stats.p95_ms, stats.p99_ms, stats.max_ms)
+    return f"| {label} | " + " | ".join(_ms(value) for value in values) + " |"
+
+
+def _ms(milliseconds: float | None) -> str:
+    """A latency in seconds with two decimals, or a dash when there is none."""
+    return "–" if milliseconds is None else f"{milliseconds / 1000.0:.2f} s"
 
 
 def _samples(values: Iterable[float], *, non_negative: bool) -> list[float]:
