@@ -4,7 +4,7 @@
 
 Agentic RAG (Retrieval-Augmented Generation) alapú chatbot prototípus Pythonban – [LangGraph](https://github.com/langchain-ai/langgraph) frameworkkel, helyben futó, nyílt forráskódú LLM-mel és [Streamlit](https://streamlit.io/) felülettel, Dockerrel teljesen konténerizálva.
 
-> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2–7. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow pedig minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait; a `docker compose up --build` pedig friss klónból elindítja a teljes stacket, és magától letölti a modellt és a korpuszt, valamint felépíti az indexet; egy 17 kérdéses funkcionális értékelés pedig méri a routingot, a visszakeresést, a válaszok helyességét és hűségét (lásd [Értékelés](#értékelés)). A terheléses teszt futtatója egyelőre típusannotált váz: jelzi, melyik fázisban készül el. Következik a 8. fázis (a terheléses teszt), majd a dokumentáció csiszolása. A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
+> **Állapot:** 🚧 Fejlesztés alatt. Az alapok elkészültek: az [1. fázis](docs/project-structure-plan.hu.md#8-felépítési-sorrend) váza (csomag, parancssori felület, konfiguráció, tesztek, lint), a közös infrastruktúra (beállítások, az LLM- és az embedding-factory offline fake változatokkal, lépésnyomkövetés, az állapotsémák, a Streamlit felület váza) és a konténeres környezet (`Dockerfile`, `compose.yaml`). A domain eldőlt (a [projektstruktúra-terv](docs/project-structure-plan.hu.md) 8–9. döntése): [frontend fejlesztői asszisztens](#problémafelvetés-és-motiváció) az MDN, a React, a Vue, a Next.js, a Nuxt és a TypeScript hivatalos dokumentációja felett, három nem visszakeresési eszközzel. A 2–8. fázis kész: az `agentic-rag ingest --download` rögzített commitokról letölti a dokumentációt, megtisztítja, feldarabolja, és felépíti belőle a vektorindexet; a RAG algráf a kérdést angol keresőkifejezéssé alakítja, visszakeresi és szűri a chunkokat, és hivatkozásokkal ellátott kontextust ad vissza; a fő workflow pedig minden kérdést a megfelelő útra irányít, az összetetteket párhuzamos keresésekre és eszközhívásokra bontja (kontraszt, specificitás, böngészőtámogatás), hivatkozott választ ír, és ellenőrzi azt; a Streamlit UI élőben mutatja a lépéseket, minden keresés alatt a RAG algráf lépéseit, valamint a válasz forrásait; a `docker compose up --build` pedig friss klónból elindítja a teljes stacket, és magától letölti a modellt és a korpuszt, valamint felépíti az indexet; egy 17 kérdéses funkcionális értékelés pedig méri a routingot, a visszakeresést, a válaszok helyességét és hűségét, egy terheléses teszt pedig megtalálja a szűk keresztmetszetet (lásd [Értékelés](#értékelés)). Következik a 9. fázis (a dokumentáció csiszolása). A *Kitöltendő* jelölésű részek a megvalósítás előrehaladtával egészülnek ki.
 
 ## Tartalom
 
@@ -52,14 +52,14 @@ A feladatkiírás egyes követelményeinek állapota:
 
 **Modell, UI és futtatási környezet**
 
-- [ ] A helyi erőforrásokhoz illeszkedő, nyílt forráskódú LLM (fizetős API-k nélkül), a trade-offok indoklásával
+- [x] A helyi erőforrásokhoz illeszkedő, nyílt forráskódú LLM (fizetős API-k nélkül), a trade-offok indoklásával
 - [x] Streamlit prototípus UI, amely bemutatja az ágens működésének főbb lépéseit és a RAG folyamat eredményét
 - [x] Konténerizálás: `Dockerfile` (kötelező) és `docker-compose.yml` (több komponens esetén előny)
 
 **Értékelés és teljesítmény**
 
 - [x] Funkcionális értékelés egy 10–20 kérdésből álló mini készleten (egyetlen node-ra vagy a teljes workflow-ra)
-- [ ] Terheléses teszt 50–200 lekérdezéssel: alapvető latency metrikák, a fő szűk keresztmetszet azonosítása, 1–2 konkrét optimalizálási javaslat
+- [x] Terheléses teszt 50–200 lekérdezéssel: alapvető latency metrikák, a fő szűk keresztmetszet azonosítása, 1–2 konkrét optimalizálási javaslat
 
 **Dokumentáció**
 
@@ -125,7 +125,7 @@ A [projektstruktúra-terv](docs/project-structure-plan.hu.md#3-a-váz-elkészít
 | Domain és adatforrás | Relevancia, elérhetőség és licenc, előfeldolgozási igény | **Frontend fejlesztői asszisztens** a hivatalos dokumentáció felett (2. fázis): MDN Web Docs (válogatott rész a CSS-ről, a HTML-ről, az akadálymentességről és a JavaScriptről; a szöveg CC BY-SA 2.5, a kódpéldák CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) és a TypeScript Handbook (CC BY 4.0). Az `agentic-rag ingest --download` rögzített commitokról tölti le őket, a `data/sources.toml` listája alapján: minden futás ugyanazokat a verziókat indexeli, és a repositoryba nem kerül share-alike licencű szöveg. A dokumentáció verziózott, strukturált, és azokat a kérdéseket fedi le, amelyeket a fejlesztők ténylegesen feltesznek. Az üzemeltetési bővítés (Kubernetes, CC BY 4.0; Docker, Apache 2.0) két újabb bejegyzés ugyanebben a listában |
 | Nem visszakeresési eszközök | Illeszkedés a domainhez; determinisztikus, helyi és tesztelhető | **Három eszköz** (4. fázis), `browser_support`, `check_contrast` és `css_specificity`: a *böngészőtámogatás* az MDN `browser-compat-data` adatbázisában (CC0; a korpuszhoz hasonlóan rögzített commitról töltődik le, `index = false` forrásként) keres meg egy funkciót, feloldja a BCD `mirror` állításait, és a verzióit a célböngészőkhöz hasonlítja; a *színkontraszt* kiszámolja két szín WCAG 2.x szerinti kontrasztarányát, és hogy megfelel-e az AA és az AAA szintnek normál és nagy szövegméretnél; a *CSS specificitás* a Selectors Level 4 szabályai szerint kiszámolja a szelektorok specificitását, és megmondja, melyik érvényesül. Mindegyik számítás vagy rögzített adatban való keresés, ezért pontosan tesztelhető, és olyan tényeket ad a modellnek, amelyeket az különben találgatna |
 | Csomagkezelés és Python-verzió | Reprodukálható build, az ML stack wheel-lefedettsége, beüzemelési igény | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` elrendezés: a lock fájl minden csomagot rögzít a helyi futtatáshoz és a képfájlhoz egyaránt, az uv maga telepíti a rögzített Pythont, és a 3.12-höz érhető el a legszélesebb wheel-lefedettség a torch és a chromadb számára |
-| LLM | Válaszminőség vs. válaszidő vs. memóriaigény (RAM/VRAM); eszközhívás (tool calling) támogatása; licenc | **`qwen2.5:7b-instruct`**, ideiglenesen: többnyelvű, Apache 2.0 licencű 7B-s instruct modell, amelynek 4 bites változata (kb. 4,7 GB) elfér a fejlesztői gép 8 GB-os VRAM-jában; az értékelés és a terheléses teszt alapján véglegesítjük vagy cseréljük. Az értékelés (7. fázis) megerősíti a gyenge pontjait, a magyar válaszokat és az eszközkérdések irányítását (helyesség 0,88, routing 0,88), és jobb jelöltet talál: a **`qwen3.5:4b` kikapcsolt gondolkodó móddal** (`OLLAMA_REASONING=false`) minden kérdést jól irányít, a helyessége 0,91, a hűsége 0,94, magyarul 0,90 és 1,00, mérete 3,4 GB; bekapcsolt gondolkodással kb. tízszer lassabb. Az alapértelmezés a terheléses teszt után változik, amely a két modell válaszidejét is összeveti |
+| LLM | Válaszminőség vs. válaszidő vs. memóriaigény (RAM/VRAM); eszközhívás (tool calling) támogatása; licenc | **`qwen3.5:4b` kikapcsolt gondolkodó móddal** (`OLLAMA_REASONING=false`), az értékelés és a terheléses teszt alapján: többnyelvű, Apache 2.0 licencű modell, 4 biten 3,4 GB, így bőven elfér a fejlesztői gép 8 GB-os VRAM-jában. Az ideiglenes `qwen2.5:7b-instruct`-hoz képest minden értékelő kérdést jól irányít (1,00 a 0,88 helyett), jobban válaszol magyarul (helyesség 0,90 a 0,80 helyett), és minden futásban ugyanazt az eredményt adja; négy egyidejű felhasználónál 28%-kal több kérést szolgál ki percenként, 39%-kal kisebb p95-tel. A gondolkodó módja kikapcsolva marad: minden hívást kb. tízszer lassabbá tett, jobb válaszok nélkül. Kompromisszum: az Ollama nem köteg-feldolgozza a hibrid architektúráját, ezért párhuzamos slotokkal a 7B-s transzformer jobban skálázódik több felhasználóra ([docs/performance.md](docs/performance.md), angolul) |
 | LLM kiszolgálás | Beüzemelési igény, konténerizálhatóság, áteresztőképesség | **Ollama** (Compose szolgáltatásként vagy a gépen futtatva) és egy **szkriptelt fake provider**: az Ollama HTTP API-t és GPU-támogatást ad anélkül, hogy bármit a képfájlba kellene fordítani; a fake (`LLM_PROVIDER=fake`) a feladatkiírás szerinti dummy LLM, és modell nélkül tartja a teszteket |
 | Eszközhívás módja | Megbízhatóság kis helyi modellekkel vs. a natív eszközhívás rugalmassága | **Strukturált kimenetű tervező + explicit eszköz-node-ok**: a tervező tipizált részfeladatokat ad vissza JSON-ként, amit a kis helyi modellek megbízhatóbban állítanak elő, mint a natív eszközhívást; az eszközök LangChain toolok maradnak, így a `bind_tools` később is lehetséges |
 | Embedding modell | Visszakeresési minőség vs. sebesség; nyelvi lefedettség | **`intfloat/multilingual-e5-small`**, ideiglenesen, helyben, sentence-transformers-szel futtatva: többnyelvű (a magyart is lefedi) és kicsi (384 dimenzió), így CPU-n fut, a GPU pedig az LLM-é marad |
@@ -133,9 +133,9 @@ A [projektstruktúra-terv](docs/project-structure-plan.hu.md#3-a-váz-elkészít
 | Vektoradatbázis | Perzisztencia, metaadat-alapú szűrés, skálázhatóság | **Chroma** perzisztens klienssel a `data/chroma_db/` könyvtárban (Compose-ban nevesített volume): perzisztencia és metaadat-alapú szűrés pickle-deszerializálás nélkül |
 | Darabolás (chunking) | Chunkméret és átfedés vs. visszakeresési pontosság és kontextushossz | **Szerkezetkövető:** a loaderek minden oldalt a H2 és H3 fejléceinél vágnak szakaszokra, a fejlécláncból `section` metaadat lesz. A szakaszokat bekezdéshatárokon legfeljebb 900 karakteres chunkokba csomagoljuk; egy kódblokk 1800 karakterig egyben marad, egy fejléc soha nem zár le chunkot, a rövid záró bekezdések (legfeljebb 150 karakter) pedig a következő chunkban megismétlődnek. Minden chunk egy kontextussorral kezdődik: a cím és a fejlécek (`useState – React > Reference > useState(initialState)`), így egy *Parameters* chunk is megnevezi a tárgyát az embedding modellnek és a promptnak. Eredmény: 18 654 chunk 1160 oldalból, a medián 602 karakter. Az értékelés (7. fázis) ezekkel a méretekkel 0,90-es hit@4-et mért; egyetlen tévedése rangsorolási, nem darabolási hiba |
 
-Megjegyzések az ideiglenes alapértelmezésekhez:
+Megjegyzések az alapértelmezésekhez:
 
-- **Modellek.** Mindkét modell alapértelmezés, nem végleges választás (a terv 4. és 5. döntése): az értékelés és a terheléses teszt mérései alapján véglegesítjük vagy cseréljük őket. A dokumentáció angol, a kérdések lehetnek magyarok vagy angolok, ezért az értékelő készlet magyar kérdéseket is tartalmaz az angol korpusz felett: ez a többnyelvű E5 modell nyelvek közötti visszakeresését és a 7B-s modell magyar válaszait egyaránt ellenőrzi.
+- **Modellek.** Az LLM-et az értékelés és a terheléses teszt alapján választottuk (4. döntés, fent). Az embedding modell az 5. döntés ideiglenes alapértelmezése marad: vele az értékelés mindkét nyelven 10-ből 9 kérdésnél megtalálja a jó oldalt, egyetlen tévedése pedig rangsorolási hiba, amelyen egy nagyobb embedding modell vagy egy hibrid kulcsszavas keresés segíthet. A dokumentáció angol, a kérdések lehetnek magyarok vagy angolok, ezért az értékelő készlet magyar kérdéseket is tartalmaz az angol korpusz felett.
 - **A korpusz terjedelme.** A keretrendszerek dokumentációja verziókat és elavult részeket is kever. A forráslista a jelenlegi útmutatókat és API-referenciákat tartja meg, például a Next.js App Routerét, és kihagyja a Pages Routert, a Nuxt Bridge-et, a migrációs útmutatókat és az MDN gyártóspecifikus szelektorait: összesen 1160 oldal (MDN 573, Nuxt 172, Next.js 165, React 151, Vue 80, TypeScript 19). Minden forrás saját könyvtárba kerül a `data/raw/` alatt (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), és a neve minden oldal címéhez hozzákerül (`useState – React`, `useState – Nuxt`), így minden hivatkozásból látszik, melyik dokumentációból származik, és az azonos nevű API-k nem keverednek.
 - **Tisztítás.** Minden dokumentáció a saját Markdown-dialektusában íródott. A loaderek az MDN makróit, a React és a Next.js JSX komponenseit, a Vue VitePress-konténereit és a Nuxt MDC komponenseit sima Markdownná alakítják, kihagyják a Next.js oldalak Pages Router blokkjait, a linkeket a szövegükre cserélik, a kódblokkokat pedig szó szerint megtartják (részletek: `src/agentic_rag/ingestion/markdown.py`).
 - **Nyelvek közötti visszakeresés.** Egy első ellenőrzés a felépített indexen megerősíti, hogy egy angol korpusz feletti magyar kérdés kockázatos. Az angol kérdések megtalálják a megfelelő oldalt: a *Which CSS pseudo-class selects a parent element that contains a specific child?* kérdésre az MDN `:has()` oldala az első, a *How do I add state to a React component?* kérdésre pedig a `Component` és a `useState` állapotkezelési szakaszai jönnek. A *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* kérdésre viszont a *Fetching Data* oldal nincs az első három találat között. Ezért a RAG algráf `rewrite_query` lépése (3. fázis) minden kérdést angol keresőkifejezéssé alakít a visszakeresés előtt. Ezzel a kérdésből *How do I fetch data on the server in Next.js App Router?* lesz, és a *Fetching Data* oldalt találja meg; a *How do I create a dynamic route in the Next.js App Router?* kérdés, amely először egy React-oldalt hozott, *next.js app router dynamic route* lesz, és a *Dynamic Route Segments* oldalt találja meg. Az értékelés (7. fázis) több kérdésen is megerősíti: a magyar kérdések ugyanolyan gyakran találják meg a jó oldalt, mint az angolok.
@@ -154,15 +154,15 @@ Megjegyzések az ideiglenes alapértelmezésekhez:
 
 | Modell | Routing | hit@4 | Helyesség | Hűség | Helyesség magyarul | Válaszidő mediánja |
 |---|---|---|---|---|---|---|
-| `qwen2.5:7b-instruct` (alapértelmezett) | 0,88 | 0,90 | 0,88 | 0,91 | 0,80 | 8,4 s |
-| `qwen3.5:4b`, gondolkodás nélkül | 1,00 | 0,90 | 0,91 | 0,94 | 0,90 | 12 s (a bíró miatti modellcserék növelik) |
+| `qwen2.5:7b-instruct` (a korábbi alapértelmezett) | 0,88 | 0,90 | 0,88 | 0,91 | 0,80 | 8,4 s |
+| `qwen3.5:4b`, gondolkodás nélkül (a 8. fázis óta alapértelmezett) | 1,00 | 0,90 | 0,91 | 0,94 | 0,90 | 12 s (a bíró miatti modellcserék növelik; a terheléses tesztben 3,6 s) |
 | `qwen3.5:4b`, gondolkodással (egy futás) | 1,00 | 0,90 | 0,91 | 0,94 | 0,90 | 143 s |
 
 **Következtetések:**
 
 - A workflow azt teszi, amire készült: a visszakeresés mindkét nyelven 10-ből 9 kérdésnél megtalálja a jó oldalt, a témán kívüli kérdést elutasítja, az eszközök pontos ítéletet adnak, amelyet minden válasz szó szerint is mutat.
-- Az alapértelmezett 7B modell gyenge pontjai az eszközkérdések irányítása (ötből kettő keresésre vagy egyetlen eszközhívásra megy; ezeket az ellenőrzés többnyire kijavítja) és a magyar válaszok (0,12-vel kisebb helyesség és 0,20-szal kisebb hűség, mint angolul).
-- A gondolkodás nélküli `qwen3.5:4b` mindkettőt kijavítja, és futásról futásra stabil, ezért a 4. döntést érdemes megváltoztatni; a terheléses teszt (8. fázis) előbb összeveti a válaszidőket.
+- A korábbi alapértelmezett, 7B-s modell gyenge pontjai az eszközkérdések irányítása (ötből kettő keresésre vagy egyetlen eszközhívásra megy; ezeket az ellenőrzés többnyire kijavítja) és a magyar válaszok (0,12-vel kisebb helyesség és 0,20-szal kisebb hűség, mint angolul).
+- A gondolkodás nélküli `qwen3.5:4b` mindkettőt kijavítja, és futásról futásra stabil; miután a terheléses teszt megerősítette, ez lett az alapértelmezés (4. döntés).
 - Az értékelés előbb hibákat talált és javított: egy témán kívüli kérdés általános tudásból kapott választ, egy kétszínpáros kontrasztkérdés egy sikertelen eszközhívás után kitalált arányokat közölt, az eszközkimenetek hibás címkét kaptak, és a bíró mindezt jutalmazta.
 
 A részletek a [docs/evaluation.md](docs/evaluation.md) fájlban vannak (angolul): a kérdésenkénti megfigyelések, a bíró kézi ellenőrzése (17-ből 15 ítéletével egyezik, és inkább szigorú), a javítások és a korlátok. Reprodukálás:
@@ -175,13 +175,31 @@ OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-m
 
 ### Terheléses teszt és a szűk keresztmetszet elemzése
 
-**Forgatókönyv:** 50–200 lekérdezés a futó rendszeren, a párhuzamossági szint, a lekérdezések összetétele és a hardver dokumentálásával.
+**Módszer:** az `agentic-rag loadtest` az értékelő készlet kérdéseit sorban küldi a lefordított gráfnak, `--concurrency` számú szálból, amelyek mindegyike a `graph.invoke`-ot hívja; előbb három bemelegítő kérés fut, ezek külön szerepelnek. Minden futás JSON-riportot és Markdown-összefoglalót ír a `data/eval/results/` mappába: válaszidő (átlag, minimum, p50, p95, p99, maximum), áteresztőképesség, hibaarány és a node-onkénti válaszidő.
 
-**Mért értékek:** válaszidő (átlag, p50, p95, p99, maximum), áteresztőképesség és hibaarány, valamint node-onkénti válaszidő-bontás a fő szűk keresztmetszet azonosításához – ezt 1–2 konkrét optimalizálási javaslat követi.
+**Eredmények** (RTX 5070 Laptop GPU, az Ollama alapbeállításaival, ha nincs másképp jelölve, 100 kérés, ha nincs másképp jelölve; egyik futásban sem volt hiba):
 
-**Már megvan:** a válaszidő-statisztikák és a riport formátuma (`agentic_rag.loadtest.runner`). A percentiliseket a legközelebbi rangok közötti lineáris interpoláció adja (a `numpy.percentile` alapértelmezése), a bemelegítő kérések külön szerepelnek, és a node-onkénti részesedésnél a `run_rag_subtask` idejét nem szabad összeadni az általa futtatott RAG algráf node-okéval, mert azokat már tartalmazza. A futtató a 8. fázisban következik: egyszer építi fel a gráfot, és egy `ThreadPoolExecutor(max_workers=concurrency)` szálain hívja a `graph.invoke`-ot, ugyanazon a szinkron úton, amelyet a UI és az értékelés is használ.
+| Futás | Párhuzamosság | Áteresztőképesség | p50 | p95 |
+|---|---|---|---|---|
+| Fake LLM és embedding (csak a keretrendszer) | 4 | 4520 / perc | 0,01 s | 0,06 s |
+| `qwen2.5:7b-instruct` | 4 | 9,5 / perc | 20,2 s | 58,0 s |
+| `qwen3.5:4b`, gondolkodás nélkül (alapértelmezett) | 4 | 12,2 / perc | 17,6 s | 35,4 s |
+| `qwen3.5:4b`, egyszerre egy kérés (50 kérés) | 1 | 11,5 / perc | 3,6 s | 14,9 s |
+| `qwen2.5:7b-instruct`, Ollama 4 párhuzamos slottal | 4 | 20,0 / perc | 10,3 s | 25,0 s |
+| `qwen3.5:4b` LLM-alapú relevancia-pontozás nélkül | 4 | 10,7 / perc | 18,2 s | 41,4 s |
 
-> 🚧 *Kitöltendő:* az eredmények, a szűk keresztmetszet elemzése, az optimalizálási javaslatok és a reprodukálásukhoz szükséges parancs.
+**Szűk keresztmetszet:** az LLM-következtetés egy olyan szerveren, amely egyszerre egy kérést szolgál ki. Egy kérés átlagosan 5,3 LLM-hívást tesz, ezek viszik az idő 99%-át; a visszakeresés 20 ms, az eszközök és a vezérlés ezredmásodpercek. Egy helyett négy egyidejű kérésnél az áteresztőképesség csak 6%-kal nő, a medián válaszidő viszont ötszörösére, mert minden hívás az Ollama sorában vár; a GPU végig dolgozik.
+
+**Javaslatok:**
+
+1. **Párhuzamos dekódolási slotok egy köteg-feldolgozható modellel** (mérve): az `OLLAMA_NUM_PARALLEL=4` megduplázza a 7B-s transzformer áteresztőképességét (percenként 20,0 a 9,5 helyett), és 57%-kal csökkenti a p95-öt, VRAM árán; a Qwen3.5 hibrid architektúráját az Ollama nem köteg-feldolgozza, így nála a beállítás semmit nem változtat. Több felhasználós telepítésnél ezért a modellt a kiszolgáló réteggel együtt kell megválasztani (párhuzamos slotok, vagy folyamatos kötegelés nagyobb GPU-n).
+2. **Kevesebb és rövidebb hívás a kritikus úton:** a válasz megírása a kiszolgálási idő fele, az ellenőrzés és az újratervezések egyötöde. A válasz streamelése a UI-ba és az eszközválaszok ellenőrzésének kihagyása (ezek amúgy is szó szerint megjelennek) csökkenti a felhasználó várakozását. A relevancia-pontozás elhagyása nem segít: mérve lassabb volt (percenként 10,7 a 12,2 helyett), mert több chunk kerül a válasz promptjába.
+
+A node-onkénti bontás, a párhuzamos slotok mikro-mérése és a parancsok a [docs/performance.md](docs/performance.md) fájlban vannak (angolul). A fő futás reprodukálása:
+
+```bash
+uv run agentic-rag loadtest --requests 100 --concurrency 4
+```
 
 ## Telepítés és futtatás
 
@@ -190,8 +208,8 @@ OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-m
 - Git.
 - Helyi fejlesztéshez [uv](https://docs.astral.sh/uv/getting-started/installation/); a Python 3.12-t is telepíti, ha hiányzik.
 - A konténerekhez Docker és Docker Compose 2.24 vagy újabb (a `compose.yaml` az opcionális `env_file` szintaxist használja).
-- Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az ideiglenes alapértelmezett modell, a `qwen2.5:7b-instruct` (4 bites, kb. 4,7 GB) elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban. A Compose stackben mérve, az alapértelmezett `OLLAMA_NUM_CTX=8192` beállítással: CPU-n az `ollama` konténer 7,7 GB RAM-ot használt, és 20–60 s alatt válaszolt; a GPU-s override-dal minden réteg elfért a 8 GB VRAM-ban, a meleg válaszok pedig 3–10 s-ig tartottak. A fake módhoz nem kell sem modell, sem GPU.
-- Lemezterület a teljes stackhez: az alkalmazás képfájlja (mérve 3,02 GB), az Ollama képfájlja (9,3 GB), a chatmodell (4,7 GB), az embedding modell, valamint a korpusz az indexével (együtt kb. 640 MB).
+- Valódi válaszokhoz helyi LLM, amelyet az [Ollama](https://ollama.com/) szolgál ki: a Compose szolgáltatás vagy a gépre telepített Ollama. Az alapértelmezett modell, a `qwen3.5:4b` (4 bites, 3,4 GB, gondolkodás nélkül) bőven elfér egy 8 GB-os GPU-n, és CPU-n is fut, lassabban; egyszerre egy kéréssel egy RTX 5070 Laptop GPU-n 3,6 s volt a medián válaszidő. A korábbi alapértelmezett, 7B-s modellel a Compose stackben mérve: CPU-n az `ollama` konténer 7,7 GB RAM-ot használt, és 20–60 s alatt válaszolt; a GPU-s override-dal a meleg válaszok 3–10 s-ig tartottak. A fake módhoz nem kell sem modell, sem GPU.
+- Lemezterület a teljes stackhez: az alkalmazás képfájlja (mérve 3,02 GB), az Ollama képfájlja (9,3 GB), a chatmodell (3,4 GB), az embedding modell, valamint a korpusz az indexével (együtt kb. 640 MB).
 
 ### Ami már most működik
 
@@ -201,7 +219,7 @@ Az alapok és a tudásbázis végponttól végpontig futnak, de a chatbot kérd�
 - a parancssori felület kilistázza a parancsait, a `config` kiírja az érvényes beállításokat;
 - az `ingest --download` letölti a korpuszt és felépíti a vektorindexet, a sima `ingest` pedig szinkronban tartja az indexet a korpusszal. A fejlesztői gépen (24 magos CPU) mérve: a letöltés kb. 25 s, az első felépítés kb. 6 perc (a 18 654 chunk beágyazása az alapértelmezett modellel, CPU-n), egy ismételt `ingest` pedig 8 s, mert a változatlan chunkokat nem ágyazza be újra. Egy lekérdezés kb. 10 ms, miután a modell betöltődött (ez kb. 11 s);
 - a RAG algráf az `invoke({"query": ...})` hívásra hivatkozásokkal ellátott kontextust és forrásokat ad vissza. Fake módban kihagyja a modellhívásokat, Ollamával átír és értékel (a Qwen2.5-7B-Instruct modellel, laptop GPU-n mérve, lásd: *Tervezési döntések*). A korpuszon kívüli kérdésre, például a *What is the capital of France?* kérdésre üres kontextus a válasz;
-- az `eval` a kérdéskészletet a gráfon vagy egy node-on futtatja, és megírja a riportot és az összefoglalóját; a `loadtest` kiírja, melyik fázisra van tervezve (`… is planned for Phase 8 (see docs/project-structure-plan.md, section 8)`), és 1-es kilépési kóddal áll le;
+- az `eval` a kérdéskészletet a gráfon vagy egy node-on futtatja, a `loadtest` pedig terhelés alatt küldi; mindkettő JSON-riportot és Markdown-összefoglalót ír, és kiírja az összefoglalót;
 - a fő workflow válaszol: fake módban szkriptelt válaszokkal, amelyek minden útvonalat bejárnak (köszönés, egy keresés, két párhuzamos keresés, eszközhívás), Ollamával valódi válaszokkal. A Qwen2.5-7B-Instruct modellel, laptop GPU-n, melegen mérve: közvetlen válasz 0,5–3 s, eszközkérdés 2–9 s, keresést igénylő kérdés 8–30 s (egy folyamat első keresése az embedding modellt is betölti, kb. 16 s); a részletek a [docs/architecture.md](docs/architecture.md#measured-with-ollama) fájlban;
 - a Streamlit UI a fő workflow-t streameli: a lépéspanel minden lépést megmutat, amint elkészül, a párhuzamosakat LangGraph-lépés szerint csoportosítja, és minden keresés alatt felsorolja a RAG algráf lépéseit (az angol keresőkifejezést, a visszakeresett és a megtartott chunkokat); a visszakeresett kontextus panel a számozott forrásokat mutatja, mindegyiket az oldala linkjével. Az üres chat útvonalanként egy példakérdést kínál (egy keresés, egy magyarul feltett összehasonlítás, eszközönként egy kérdés), amelyek a fake LLM-mel is működnek. A hiányzó indexet, a más embeddinggel épített indexet, az elérhetetlen Ollamát és a le nem töltött modellt a chat a javítás módjával együtt elmagyarázza. A felhasználó által megállított futás a *Stopped before an answer was produced.* üzenetet kapja, az ágens az új kérdés mellett csak a korábbi megválaszolt kérdéseket kapja meg, a válaszok `$` jelei szövegként jelennek meg (LaTeX nélkül), érvénytelen beállítás vagy olvashatatlan `.env` esetén pedig a chat helyén *Invalid configuration* hiba áll;
 - friss klónból a `docker compose up --build` minden további lépés nélkül letölti a chatmodellt és a korpuszt, felépíti az indexet, és kiszolgálja a UI-t (mérve a fejlesztői gépen: első indítás 25 perc, újraindítás 11 s); fake módban egyetlen konténer kb. 45 s alatt áll készen.
@@ -247,12 +265,12 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fájlt, ha a lock fájl nem egyezik a `pyproject.toml`-lal; a képfájl buildje ugyanezt az ellenőrzést használja.
 
-A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `800 passed, 1 deselected` (2026. 10. 03-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
+A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `807 passed, 1 deselected` (2026. 10. 03-án mérve; a sikeres tesztek száma a fázisokkal nő). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 
 ```bash
-ollama pull qwen2.5:7b-instruct
+ollama pull qwen3.5:4b
 uv run pytest -m ollama       # élő ellenőrzés a helyi szerverrel; kimarad, ha a szerver nem érhető el
 ```
 
@@ -302,7 +320,7 @@ A `--no-deps` kihagyja a két Ollama szolgáltatást. A korpusz ekkor is letölt
 docker compose -f compose.yaml -f compose.gpu.yaml up --build
 ```
 
-NVIDIA driver és Docker GPU-támogatás kell hozzá: Windowson Docker Desktop WSL 2 backenddel, Linuxon az NVIDIA Container Toolkit. Alapértelmezetté a `.env` fájlban megadott `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` beállítással tehető (Windowson `;` az elválasztó). Az override nélkül az Ollama CPU-n fut. Az alapértelmezett modellel mérve: CPU-n 20–60 s egy válasz, egy RTX 5070 Laptop GPU-n melegen 3–10 s (az első válasz a modelleket is betölti, kb. 45 s).
+NVIDIA driver és Docker GPU-támogatás kell hozzá: Windowson Docker Desktop WSL 2 backenddel, Linuxon az NVIDIA Container Toolkit. Alapértelmezetté a `.env` fájlban megadott `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` beállítással tehető (Windowson `;` az elválasztó). Az override nélkül az Ollama CPU-n fut. A korábbi alapértelmezett, 7B-s modellel mérve: CPU-n 20–60 s egy válasz, egy RTX 5070 Laptop GPU-n melegen 3–10 s (az első válasz a modelleket is betölti, kb. 45 s).
 
 **A gépen futó Ollama** az `ollama` szolgáltatás helyett:
 
@@ -364,10 +382,10 @@ A valódi környezeti változók elsőbbséget élveznek a `.env`-del szemben, a
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama`, vagy `fake` a szkriptelt offline modellhez |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Az Ollama szerver címe |
-| `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Az Ollama chatmodell tagje (ideiglenes) |
+| `OLLAMA_MODEL` | `qwen3.5:4b` | Az Ollama chatmodell tagje (4. döntés) |
 | `OLLAMA_NUM_CTX` | `8192` | A kontextusablak tokenben, 512–131072, az Ollama `num_ctx` paramétereként elküldve; a prompt és a válasz osztozik rajta, a hosszabb promptot az Ollama szó nélkül levágja |
 | `OLLAMA_TIMEOUT_S` | `120.0` | Az egyes Ollama-kérések HTTP-időkorlátja másodpercben, 0-nál nagyobb |
-| `OLLAMA_REASONING` | üres | A gondolkodó modellek (pl. Qwen3.5) gondolkodó módja: a `false` kikapcsolja, a `true` bekapcsolja, üresen a modell alapértelmezése marad. Az értékelésben a gondolkodás kb. tízszer lassabbá tette a `qwen3.5:4b` modellt |
+| `OLLAMA_REASONING` | `false` | A gondolkodó modellek (pl. Qwen3.5) gondolkodó módja: a `false` kikapcsolja, a `true` bekapcsolja; a gondolkodó mód nélküli modellek figyelmen kívül hagyják. Az értékelésben a gondolkodás kb. tízszer lassabbá tette a `qwen3.5:4b` modellt, jobb válaszok nélkül |
 | `LLM_TEMPERATURE` | `0.0` | Mintavételi hőmérséklet, 0,0–2,0 |
 | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface`, vagy `fake` az offline, hash-alapú embeddinghez |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` | Hugging Face embedding modell (ideiglenes) |
@@ -393,18 +411,17 @@ A Compose stackben a `compose.yaml` az `app` szolgáltatásnak az `OLLAMA_BASE_U
 | `ingest [--rebuild] [--download] [--sources PATH]` | A vektorindex felépítése vagy frissítése a `DATA_DIR` tartalmából; `--download` esetén előbb letölti a korpusz forrásait (git kell hozzá) | Most |
 | `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | A lefordított gráfok Mermaid diagramjai | Most |
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH] [--judge-model NAME]` | Funkcionális értékelés: JSON-riportot és Markdown-összefoglalót ír, az összefoglalót ki is írja | Most |
-| `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Terheléses teszt a lefordított gráfon | 8. fázis |
+| `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH] [--dataset PATH]` | Terheléses teszt a lefordított gráfon: JSON-riportot és Markdown-összefoglalót ír, az összefoglalót ki is írja | Most |
 
 Kilépési kódok:
 
 - 0 siker esetén;
-- 1, ha a parancs hibára futott: egy későbbi fázisra tervezett funkció (`PlannedFeatureError`), a hiányzó korpusz és a sikertelen letöltés (`ingest`), valamint a hiányzó vagy hibás kérdéskészlet és a hiányzó index (`eval`) csak az üzenetét írja ki, minden más hiba a traceback-jét;
+- 1, ha a parancs hibára futott: egy későbbi fázisra tervezett funkció (`PlannedFeatureError`), a hiányzó korpusz és a sikertelen letöltés (`ingest`), valamint a hiányzó vagy hibás kérdéskészlet és a hiányzó index (`eval`, `loadtest`) csak az üzenetét írja ki, minden más hiba a traceback-jét;
 - 2 használati és konfigurációs hibák esetén: érvénytelen kapcsolók (ide tartozik az `InvalidArgumentError` is, például egy `NODE_TARGETS`-en kívüli `eval --node`), érvénytelen beállítások, vagy `ConfigurationError` (olvashatatlan vagy nem UTF-8 kódolású `.env`, érvénytelen `data/sources.toml`, vagy más embeddinggel épített index, `EmbeddingMismatchError`);
 - 130 megszakításkor.
 
 A részletek a [docs/architecture.md](docs/architecture.md#errors-and-exit-codes) fájlban találhatók (angolul).
 
-> 🚧 *Kitöltendő:* az értékelés és a terheléses teszt futtatása (7–8. fázis).
 
 ## Projektstruktúra
 
@@ -462,7 +479,7 @@ agentic-rag-chatbot-poc/
 │       │   ├── metrics.py          # hit@k, routing-pontosság, LLM-mel pontozott helyesség és hűség
 │       │   └── runner.py           # run_evaluation(), a riportmodellek és a Markdown-összefoglaló
 │       ├── loadtest/
-│       │   └── runner.py           # válaszidő-statisztikák és riportmodell; run_load_test() a 8. fázisban
+│       │   └── runner.py           # run_load_test(), a válaszidő-statisztikák, a riport és összefoglalója
 │       └── ui/
 │           ├── app.py              # Streamlit belépési pont
 │           └── components.py       # lépéspanel, kontextus panel, hibamagyarázatok, példák

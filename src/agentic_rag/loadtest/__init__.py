@@ -11,5 +11,6 @@ in ``docs/performance.md``. The ``agentic-rag loadtest`` command is the entry po
 Modules:
 
 - ``runner``: the latency statistics, the report model, which is the format of the committed
-  result files, and ``run_load_test`` (Phase 8), whose docstring explains the thread pool.
+  result files, ``run_load_test``, whose docstring explains the thread pool, and the
+  report writer and summary.
 """

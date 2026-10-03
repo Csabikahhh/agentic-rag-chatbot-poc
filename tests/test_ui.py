@@ -1342,7 +1342,7 @@ def test_settings_summary_describes_providers_models_top_k_and_grading(
         }
     )
     assert settings_summary(local) == {
-        ":material/smart_toy: LLM": "`ollama` · `qwen2.5:7b-instruct`",
+        ":material/smart_toy: LLM": "`ollama` · `qwen3.5:4b`",
         ":material/lan: Ollama URL": "`http://localhost:11434`",
         ":material/scatter_plot: Embeddings": "`huggingface` · `intfloat/multilingual-e5-small`",
         ":material/format_list_numbered: Top-k": "8",

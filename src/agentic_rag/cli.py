@@ -5,8 +5,9 @@ Commands:
                   download the corpus sources of data/sources.toml.
     eval          Run the functional evaluation on the full graph or one node; write the
                   report and print its summary.
-    loadtest      Send N queries at a given concurrency and report latencies (Phase 8).
-    export-graph  Print or write the Mermaid diagrams of the compiled graphs (Phases 3-4).
+    loadtest      Send N queries at a given concurrency; write the latency report and print
+                  its summary.
+    export-graph  Print or write the Mermaid diagrams of the compiled graphs.
     config        Print the effective settings as KEY=value lines.
     serve         Start the Streamlit UI; with INGEST_ON_START, first download the missing
                   corpus sources and bring the index up to date (the container's command).
@@ -16,7 +17,7 @@ Exit codes:
     1    The command failed. A feature that is planned for a later phase
          (``agentic_rag.errors.PlannedFeatureError``), a missing corpus and a failed corpus
          download (``ingest``), and a missing or invalid question set or a missing index
-         (``eval``) print only their message. Any other
+         (``eval``, ``loadtest``) print only their message. Any other
          exception propagates with its traceback (Python then exits with 1), including a
          plain ``NotImplementedError`` from a library and a ``ValidationError`` raised inside
          a command: those are bugs, not planned gaps or configuration errors.
@@ -208,7 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     loadtest = _add_command(
-        commands, "loadtest", _run_loadtest, "run the load test against the compiled graph"
+        commands,
+        "loadtest",
+        _run_loadtest,
+        "run the load test against the compiled graph",
+        validate=_check_loadtest_args,
     )
     loadtest.add_argument(
         "--requests",
@@ -236,6 +241,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="directory for the result files (default: data/eval/results)",
+    )
+    loadtest.add_argument(
+        "--dataset",
+        type=Path,
+        metavar="PATH",
+        help="the questions to send, in turn (default: data/eval/questions.jsonl)",
     )
 
     export = _add_command(
@@ -371,6 +382,13 @@ def _check_eval_args(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _check_loadtest_args(args: argparse.Namespace) -> str | None:
+    """Check the options of ``loadtest`` that argparse cannot express."""
+    if args.dataset is not None and not args.dataset.is_file():
+        return f"--dataset: file not found: {args.dataset}"
+    return None
+
+
 def _check_export_args(args: argparse.Namespace) -> str | None:
     """Check the option combinations of ``export-graph`` that argparse cannot express."""
     if args.format == "mermaid" and args.graph == "all":
@@ -429,17 +447,26 @@ def _run_eval(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _run_loadtest(args: argparse.Namespace, settings: Settings) -> int:
-    """Run the load test with ``agentic_rag.loadtest.runner.run_load_test``."""
-    from agentic_rag.loadtest.runner import run_load_test
+    """Run the load test with ``agentic_rag.loadtest.runner.run_load_test``.
 
-    report = run_load_test(
-        settings,
-        requests=args.requests,
-        concurrency=args.concurrency,
-        warmup=args.warmup,
-        output_dir=args.output_dir,
-    )
-    _print_result(report)
+    The report files are written by the runner; the Markdown summary goes to standard output.
+    """
+    from agentic_rag.evaluation.dataset import DatasetError
+    from agentic_rag.loadtest.runner import render_summary, run_load_test
+
+    try:
+        report = run_load_test(
+            settings,
+            requests=args.requests,
+            concurrency=args.concurrency,
+            warmup=args.warmup,
+            output_dir=args.output_dir,
+            dataset_path=args.dataset,
+        )
+    except (FileNotFoundError, DatasetError) as exc:  # The question set.
+        print(f"{PROG} loadtest: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.write(render_summary(report))
     return 0
 
 

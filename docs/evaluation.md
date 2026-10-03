@@ -1,6 +1,6 @@
 # Functional evaluation
 
-> **Status:** Phase 7, 2026-10-03. Every number below comes from a report committed in [`data/eval/results/`](../data/eval/results/), except the first run before the fixes and the timing of one single call, and can be reproduced with the commands at the end. The load test follows in Phase 8.
+> **Status:** Phase 7, 2026-10-03. Every number below comes from a report committed in [`data/eval/results/`](../data/eval/results/), except the first run before the fixes and the timing of one single call, and can be reproduced with the commands at the end. The load test of Phase 8 is in [performance.md](performance.md); it confirmed the conclusion on the model, and `qwen3.5:4b` with thinking off became the default.
 
 ## Contents
 
@@ -42,7 +42,7 @@ The judge picks one of three verdicts instead of writing a score, because a smal
 ### Setup
 
 - Windows 11, NVIDIA RTX 5070 Laptop GPU (8 GB), Ollama 0.35.0 on the host.
-- LLM: Qwen2.5-7B-Instruct, 4-bit `Q4_K_M` (the `hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M` build, the same model and quantization as the default `qwen2.5:7b-instruct` tag), temperature 0, `OLLAMA_NUM_CTX=8192`. For the comparison: Qwen3.5-4B (`qwen3.5:4b`), with and without its thinking mode.
+- LLM: Qwen2.5-7B-Instruct, 4-bit `Q4_K_M` (the `hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M` build, the same model and quantization as the `qwen2.5:7b-instruct` tag, the default until Phase 8), temperature 0, `OLLAMA_NUM_CTX=8192`. For the comparison: Qwen3.5-4B (`qwen3.5:4b`), with and without its thinking mode.
 - Judge: the same Qwen2.5-7B build in every run, also when Qwen3.5 answers (`--judge-model`).
 - Embeddings `intfloat/multilingual-e5-small` on the CPU, the full index (18 654 chunks), `TOP_K=4`, `GRADE_WITH_LLM=true`, `MAX_RETRIES=2`.
 
@@ -52,8 +52,8 @@ Three runs of the full graph per configuration, because the runs vary (see [Limi
 
 | Model | Routing | hit@4 | Correctness | Faithfulness | Latency per question (median) |
 |---|---|---|---|---|---|
-| Qwen2.5-7B (default) | 0.88 | 0.90 | 0.88 (0.82–0.91) | 0.91 (0.88–0.94) | 8.4 s |
-| Qwen3.5-4B, thinking off | 1.00 | 0.90 | 0.91 | 0.94 | 12 s ¹ |
+| Qwen2.5-7B (the default until Phase 8) | 0.88 | 0.90 | 0.88 (0.82–0.91) | 0.91 (0.88–0.94) | 8.4 s |
+| Qwen3.5-4B, thinking off (the default since Phase 8) | 1.00 | 0.90 | 0.91 | 0.94 | 12 s ¹ |
 | Qwen3.5-4B, thinking on (one run) | 1.00 | 0.90 | 0.91 | 0.94 | 143 s |
 
 ¹ Inflated: the two models do not fit in the 8 GB of VRAM together, so Ollama reloads Qwen3.5 after every judge call. The node runs below have no judge.
@@ -79,7 +79,7 @@ The question-by-question tables are in the Markdown summaries next to every repo
 
 ## Findings per question
 
-With Qwen2.5-7B, the default:
+With Qwen2.5-7B, the default at the time:
 
 - **Retrieval works for both languages.** hit@4 is 0.90 on the graph: the English query rewrite brings the Hungarian questions (q07, q08, q10) to the right pages. The only miss is q03: for *computed property with the Composition API* the search returns the Options API reference (`vue/api/options-state.md`) or the Composition API FAQ, never the guide page `computed.md`. Retrieval alone (one search for the whole question) scores 0.80: the graph also recovers q02 through its plan.
 - **Routing errs on two tool questions, every time.** The specificity question (q12) goes to a search, and the two-contrast question (q15) to a single tool call. The verification and the re-plan repair q12 in every run (the answer is correct); q15 is answered correctly in two runs out of three, and in the third, one ratio is invented (*4.5:1* for black on `#f5f5f5`, really 19.26:1).
@@ -88,11 +88,11 @@ With Qwen2.5-7B, the default:
 
 ## Model comparison
 
-Qwen3.5-4B with its thinking mode switched off (`OLLAMA_REASONING=false`) answers better than the 7B default on every metric that differs: it routes all 16 questions right (q12 and q15 included, in all three node and graph runs), retrieves better alone (0.90 against 0.80, through a better English rewrite), and its Hungarian and multi-part answers are correct and faithful in every run. It gave the same scores in all three runs, while the 7B model varied. Its one systematic failure is q03: it follows the retrieved Options API reference faithfully and gets the Composition API wrong (correctness 0), where the 7B model answers partly from general knowledge.
+Qwen3.5-4B with its thinking mode switched off (`OLLAMA_REASONING=false`) answers better than the 7B model on every metric that differs: it routes all 16 questions right (q12 and q15 included, in all three node and graph runs), retrieves better alone (0.90 against 0.80, through a better English rewrite), and its Hungarian and multi-part answers are correct and faithful in every run. It gave the same scores in all three runs, while the 7B model varied. Its one systematic failure is q03: it follows the retrieved Options API reference faithfully and gets the Composition API wrong (correctness 0), where the 7B model answers partly from general knowledge.
 
 With thinking on, the quality is the same, but every call writes a long hidden reasoning first: a question took 143 s at the median, against 12 s with thinking off. One call measured on its own: 13.8 s with thinking, 0.7 s without. Thinking is therefore useless for this agent, which makes four to eight LLM calls per question.
 
-The model is 3.4 GB instead of 4.7 GB, so it leaves more of an 8 GB GPU for the KV cache of parallel requests. Per call it is as fast as the 7B model (0.8 s against 0.9 s routing, 0.6 s against 0.5 s retrieval); the end-to-end latency without the judge's model swaps is what the load test measures.
+The model is 3.4 GB instead of 4.7 GB, so it leaves more of an 8 GB GPU for the KV cache of parallel requests. Per call it is as fast as the 7B model (0.8 s against 0.9 s routing, 0.6 s against 0.5 s retrieval); the end-to-end latency without the judge's model swaps is what the load test measured: 3.6 s at the median for one user, and 28 % more requests per minute than the 7B model with four ([performance.md](performance.md#consequence-for-the-model-choice)).
 
 ## How reliable the judge is
 
@@ -115,7 +115,7 @@ The first run (not committed: it ran before the fixes; routing 0.88, hit@4 0.70,
 | A tool result kept from a rejected round was labelled `tool` instead of its name, and a check that a re-plan repeated was shown twice | `SubtaskResult.tool_name` names the tool; `finalize_response` shows each tool output once |
 | The judge rated *Paris* correct for a question whose reference answer is a refusal, and wrong ratios only partially correct | The correctness prompt says that a declining answer is correct when the reference says so, and that a wrong number, version or verdict on the main point makes an answer incorrect |
 | q07 and q09 retrieved the Next.js `fetch` API reference and the Nuxt `$fetch` page, which answer the questions as well as the expected guide pages | Those pages (and the Nuxt `useFetch` and `useAsyncData` pages) were added to `expected_documents`; the items' `notes` record it |
-| Qwen3.5-4B took minutes per question | `OLLAMA_REASONING` turns the thinking mode of reasoning models off (`false`) or on; unset keeps the model's default |
+| Qwen3.5-4B took minutes per question | `OLLAMA_REASONING` turns the thinking mode of reasoning models off (`false`) or on; unset kept the model's default (since Phase 8 the default is `false`) |
 
 The router examples are not questions of the set, and the expected documents were only extended with pages that contain the answer, so the set still measures generalization rather than the prompt.
 
@@ -129,9 +129,9 @@ The router examples are not questions of the set, and the expected documents wer
 
 ## Conclusions
 
-1. **The agentic workflow does what it is built for.** With the default 7B model the answers score 0.88 for correctness and 0.91 for faithfulness on average; retrieval finds the right page for 9 of 10 questions in both languages, the out-of-scope question is declined, and the tools deliver exact verdicts that are always shown verbatim.
+1. **The agentic workflow does what it is built for.** With the 7B model, the default at the time, the answers score 0.88 for correctness and 0.91 for faithfulness on average; retrieval finds the right page for 9 of 10 questions in both languages, the out-of-scope question is declined, and the tools deliver exact verdicts that are always shown verbatim.
 2. **The weak points are routing tool questions and Hungarian.** The 7B router misroutes two of the five tool questions; the verification and the re-plan repair q12 in every run and q15 in two runs of three. Hungarian answers lose about 0.12 in correctness and 0.20 in faithfulness against English.
-3. **Decision 4 should change: Qwen3.5-4B with thinking off is the better model here.** It fixes both weak points (routing 1.00, Hungarian 0.90 and 1.00), is stable from run to run and smaller. It must run with `OLLAMA_REASONING=false`: with thinking on it is about ten times slower without being better. The switch of the default is left for the load test (Phase 8), which compares the two models' latency under load before the default changes.
+3. **Decision 4 changes: Qwen3.5-4B with thinking off is the better model here.** It fixes both weak points (routing 1.00, Hungarian 0.90 and 1.00), is stable from run to run and smaller. It must run with `OLLAMA_REASONING=false`: with thinking on it is about ten times slower without being better. The load test (Phase 8) compared the two models' latency under load before the default changed; Qwen3.5-4B was faster there too, and it is the default since ([performance.md](performance.md#consequence-for-the-model-choice)).
 4. **Retrieval has one known gap:** the Vue guide page on computed properties is outranked by the API reference. A larger embedding model, or a hybrid keyword search, is the next lever; with `TOP_K=4` and grading on, hit@4 is 0.90.
 
 ## Reproducing the runs

@@ -515,19 +515,26 @@ def test_eval_usage_errors(
     assert error in err
 
 
-def test_loadtest_forwards_its_options(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_loadtest_forwards_its_options_and_prints_the_summary(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[dict[str, Any]] = []
     install_module(
         monkeypatch,
         "agentic_rag.loadtest.runner",
         run_load_test=recorder(calls, Report(name="load", count=100)),
+        render_summary=lambda report: f"# Load test {report.name}\n",
     )
+    dataset = tmp_path / "questions.jsonl"
+    dataset.write_text("", encoding="utf-8")
 
     assert cli.main(["loadtest"]) == 0
+    assert capsys.readouterr().out == "# Load test load\n"
     argv = ["loadtest", "--requests", "50", "--concurrency", "8", "--warmup", "0"]
-    assert cli.main([*argv, "--output-dir", str(tmp_path)]) == 0
+    assert cli.main([*argv, "--output-dir", str(tmp_path), "--dataset", str(dataset)]) == 0
 
     assert calls == [
         {
@@ -536,6 +543,7 @@ def test_loadtest_forwards_its_options(
             "concurrency": 4,
             "warmup": 3,
             "output_dir": None,
+            "dataset_path": None,
         },
         {
             "settings": settings,
@@ -543,6 +551,7 @@ def test_loadtest_forwards_its_options(
             "concurrency": 8,
             "warmup": 0,
             "output_dir": tmp_path,
+            "dataset_path": dataset,
         },
     ]
 

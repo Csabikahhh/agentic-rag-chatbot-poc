@@ -4,7 +4,7 @@
 
 An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — built with [LangGraph](https://github.com/langchain-ai/langgraph), powered by a locally hosted open-source LLM, with a [Streamlit](https://streamlit.io/) UI, and fully containerized with Docker.
 
-> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 7 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; and `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own; and a functional evaluation of 17 questions measures routing, retrieval, correctness and faithfulness (see [Evaluation](#evaluation)). The load-test runner is a typed skeleton that reports the phase it is planned for. Next: Phase 8 (the load test), then the documentation polish. Sections marked *To be completed* are filled in as the implementation progresses.
+> **Status:** 🚧 Work in progress. The foundation is in place: the [Phase 1](docs/project-structure-plan.md#8-build-order) scaffold (package, CLI, configuration, tests, linting), the shared infrastructure (settings, the LLM and embedding factories with offline fakes, step traces, the state contracts, the Streamlit shell) and the container setup (`Dockerfile`, `compose.yaml`). The domain is chosen (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): a [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools. Phases 2 to 8 are done: `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; and the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; and `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own; and a functional evaluation of 17 questions measures routing, retrieval, correctness and faithfulness, and a load test finds the bottleneck (see [Evaluation](#evaluation)). Next: Phase 9 (the documentation polish). Sections marked *To be completed* are filled in as the implementation progresses.
 
 ## Contents
 
@@ -52,14 +52,14 @@ Status of each requirement from the brief:
 
 **Model, UI & deployment**
 
-- [ ] Open-source LLM that fits the local resources (no paid APIs), with the trade-offs justified
+- [x] Open-source LLM that fits the local resources (no paid APIs), with the trade-offs justified
 - [x] Streamlit prototype UI that shows the agent's main steps and the result of the RAG process
 - [x] Containerized: `Dockerfile` (required) and `docker-compose.yml` (a plus for multi-component setups)
 
 **Evaluation & performance**
 
 - [x] Functional evaluation on a mini set of 10–20 questions (a single node or the full workflow)
-- [ ] Load test with 50–200 queries: basic latency metrics, the main bottleneck, 1–2 concrete optimization proposals
+- [x] Load test with 50–200 queries: basic latency metrics, the main bottleneck, 1–2 concrete optimization proposals
 
 **Documentation**
 
@@ -125,7 +125,7 @@ Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3
 | Domain & data source | Relevance, availability and licensing, preprocessing effort | **Frontend developer assistant** over the official documentation (Phase 2): MDN Web Docs (a curated subset on CSS, HTML, accessibility and JavaScript; prose CC BY-SA 2.5, code samples CC0), React (CC BY 4.0), Vue (CC BY 4.0), Next.js (MIT), Nuxt (MIT) and the TypeScript Handbook (CC BY 4.0). `agentic-rag ingest --download` fetches them from pinned commits, as listed in `data/sources.toml`: every run indexes the same versions, and no share-alike text enters the repository. The documentation is versioned, structured and covers the questions developers actually ask. The operations extension (Kubernetes, CC BY 4.0; Docker, Apache 2.0) is two more entries in the same list |
 | Non-retrieval tools | Fit to the domain; deterministic, local and testable | **Three tools** (Phase 4), `browser_support`, `check_contrast` and `css_specificity`: *browser support* looks a feature up in MDN's `browser-compat-data` (CC0, downloaded at a pinned commit like the corpus, as a source with `index = false`), resolves BCD's `mirror` statements and compares the versions with the target browsers; *colour contrast* computes the WCAG 2.x contrast ratio of two colours and whether it passes AA and AAA for normal and large text; *CSS specificity* computes the specificity of selectors by the Selectors Level 4 rules and tells which one wins. Each is a computation or a lookup in pinned data, so it can be tested exactly, and it gives the model facts it would otherwise guess |
 | Packaging & Python version | Reproducible builds, wheel coverage of the ML stack, setup effort | **uv** (`pyproject.toml` + `uv.lock`), **Python 3.12**, `src/` layout: the lock file pins every package for local runs and the image alike, uv installs the pinned Python itself, and 3.12 has the widest wheel coverage for torch and chromadb |
-| LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen2.5:7b-instruct`**, provisional: a multilingual 7B instruct model under the Apache 2.0 license whose 4-bit build (about 4.7 GB) fits in the 8 GB of VRAM of the development machine; confirmed or replaced by the evaluation and the load test. The evaluation (Phase 7) confirms its weak points, Hungarian answers and the routing of tool questions (correctness 0.88, routing 0.88), and finds a better candidate: **`qwen3.5:4b` with its thinking mode off** (`OLLAMA_REASONING=false`) routes every question right and scores 0.91 correctness and 0.94 faithfulness, 0.90 and 1.00 in Hungarian, at 3.4 GB; with thinking on it is about ten times slower. The default changes once the load test has compared the two models' latency |
+| LLM | Answer quality vs. latency vs. memory (RAM/VRAM); tool-calling support; license | **`qwen3.5:4b` with its thinking mode off** (`OLLAMA_REASONING=false`), chosen by the evaluation and the load test: a multilingual model under the Apache 2.0 license, 3.4 GB at 4 bits, which leaves room in the 8 GB of VRAM of the development machine. Against the provisional `qwen2.5:7b-instruct` it routes every evaluation question right (1.00 against 0.88), answers Hungarian questions better (correctness 0.90 against 0.80) and gives the same scores in every run; with four concurrent users it serves 28 % more requests per minute with a 39 % lower p95. Its thinking mode stays off: it made every call about ten times slower without better answers. Trade-off: Ollama does not batch its hybrid architecture, so with parallel slots the 7B transformer scales better to several users ([docs/performance.md](docs/performance.md)) |
 | LLM serving | Setup effort, containerization, throughput | **Ollama** (a Compose service, or Ollama on the host) plus a **scripted fake provider**: Ollama gives an HTTP API and GPU support without compiling anything into the image; the fake (`LLM_PROVIDER=fake`) is the brief's dummy LLM and keeps the tests model-free |
 | Tool-calling style | Reliability with small local models vs. flexibility of native tool calling | **Structured-output planner + explicit tool nodes**: the planner emits typed sub-tasks as JSON, which small local models produce more reliably than native tool calls; the tools stay LangChain tools, so `bind_tools` remains possible |
 | Embedding model | Retrieval quality vs. speed; language coverage | **`intfloat/multilingual-e5-small`**, provisional, run locally with sentence-transformers: multilingual (Hungarian included) and small (384 dimensions), so it runs on the CPU and leaves the GPU to the LLM |
@@ -133,9 +133,9 @@ Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3
 | Vector store | Persistence, metadata filtering, scalability | **Chroma** with a persistent client in `data/chroma_db/` (a named volume in Compose): persistence and metadata filtering without pickle deserialization |
 | Chunking | Chunk size and overlap vs. retrieval precision and context length | **Structure-aware:** the loaders split every page at its H2 and H3 headings, and the heading path becomes the `section` metadata. Each section is packed into chunks of up to 900 characters at paragraph boundaries; a code block stays whole up to 1 800 characters, a heading never ends a chunk, and short trailing paragraphs (up to 150 characters) are repeated in the next chunk. Every chunk starts with a context line of title and headings (`useState – React > Reference > useState(initialState)`), so a chunk such as *Parameters* still names its subject for the embedding model and the prompt. Result: 18 654 chunks from 1 160 pages, median 602 characters. The evaluation (Phase 7) measured a retrieval hit@4 of 0.90 with these sizes; its one miss is a ranking problem, not a chunking one |
 
-Notes on the provisional defaults:
+Notes on the defaults:
 
-- **Models.** Both models are defaults, not final choices (plan decisions 4 and 5): they are confirmed or replaced once the evaluation and the load test have measured them. The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus: the cross-lingual retrieval of the multilingual E5 model and the Hungarian answers of the 7B model.
+- **Models.** The LLM was chosen with the evaluation and the load test (decision 4, above). The embedding model stays the provisional default of decision 5: the evaluation finds the right page for 9 of 10 questions in both languages with it, and its one miss is a ranking problem that a larger embedding model or a hybrid keyword search could address. The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus.
 - **Corpus scope.** The framework documentation mixes versions and legacy sections. The source list keeps the current guides and API references, such as the App Router of Next.js, and leaves out the Pages Router, Nuxt Bridge, the migration guides and MDN's vendor-prefixed selectors: 1 160 pages (MDN 573, Nuxt 172, Next.js 165, React 151, Vue 80, TypeScript 19). Every source is stored in a directory of its own under `data/raw/` (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), and its name is added to every page title (`useState – React`, `useState – Nuxt`), so every citation shows which documentation it comes from, and APIs of the same name stay apart.
 - **Cleaning.** Each documentation set writes Markdown in its own dialect. The loaders turn MDN's macros, the JSX components of React and Next.js, Vue's VitePress containers and Nuxt's MDC components into plain Markdown, drop the Pages Router blocks of the Next.js pages, replace links by their text, and keep every code block verbatim (details in `src/agentic_rag/ingestion/markdown.py`).
 - **Cross-lingual retrieval.** A first check on the built index confirms the risk of a Hungarian question over an English corpus. English questions find the right page: *Which CSS pseudo-class selects a parent element that contains a specific child?* returns MDN's `:has()` first, and *How do I add state to a React component?* returns the state sections of `Component` and `useState`. The Hungarian question *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* ("How do I fetch data on the server in the Next.js App Router?") does not reach the *Fetching Data* page in the top three. The `rewrite_query` step of the RAG subgraph (Phase 3) therefore turns every question into an English search query before retrieval. With it, the question becomes *How do I fetch data on the server in Next.js App Router?* and retrieves the *Fetching Data* page; *How do I create a dynamic route in the Next.js App Router?*, which first found a React page, becomes *next.js app router dynamic route* and finds *Dynamic Route Segments*. The evaluation (Phase 7) confirms it on more questions: the Hungarian questions retrieve the right pages as often as the English ones.
@@ -154,15 +154,15 @@ Notes on the provisional defaults:
 
 | Model | Routing | hit@4 | Correctness | Faithfulness | Hungarian correctness | Median latency |
 |---|---|---|---|---|---|---|
-| `qwen2.5:7b-instruct` (default) | 0.88 | 0.90 | 0.88 | 0.91 | 0.80 | 8.4 s |
-| `qwen3.5:4b`, thinking off | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 12 s (inflated by the judge's model swaps) |
+| `qwen2.5:7b-instruct` (the former default) | 0.88 | 0.90 | 0.88 | 0.91 | 0.80 | 8.4 s |
+| `qwen3.5:4b`, thinking off (the default since Phase 8) | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 12 s (inflated by the judge's model swaps; 3.6 s in the load test) |
 | `qwen3.5:4b`, thinking on (one run) | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 143 s |
 
 **Conclusions:**
 
 - The workflow does what it is built for: retrieval finds the right page for 9 of 10 questions in both languages, the out-of-scope question is declined, and the tools give exact verdicts, shown verbatim in every answer.
-- With the default 7B model, the weak points are the routing of tool questions (two of five go to a search or to a single tool call; the verifier repairs most of these) and Hungarian answers (0.12 lower correctness, 0.20 lower faithfulness than English).
-- `qwen3.5:4b` with thinking off fixes both and is stable from run to run, so decision 4 should change; the load test (Phase 8) compares the latency before the default does.
+- With the former default, the 7B model, the weak points were the routing of tool questions (two of five go to a search or to a single tool call; the verifier repairs most of these) and Hungarian answers (0.12 lower correctness, 0.20 lower faithfulness than English).
+- `qwen3.5:4b` with thinking off fixes both and is stable from run to run; after the load test confirmed it, it became the default (decision 4).
 - The evaluation found and fixed defects first: an out-of-scope question answered from general knowledge, a two-contrast question that invented its ratios after a failed tool call, mislabelled tool outputs, and a judge that rewarded both.
 
 [docs/evaluation.md](docs/evaluation.md) has the details: the question-by-question findings, a manual review of the judge (it agrees with 15 of 17 verdicts and errs on the strict side), the fixes and the limitations. To reproduce:
@@ -175,13 +175,31 @@ OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-m
 
 ### Load test & bottleneck analysis
 
-**Scenario:** 50–200 queries against the running system, with the concurrency level, query mix and hardware documented.
+**Method:** `agentic-rag loadtest` sends the questions of the evaluation set in turn to the compiled graph, from `--concurrency` threads that each call `graph.invoke`; three warm-up requests run first and are reported apart. Every run writes a JSON report and a Markdown summary to `data/eval/results/`: latency (mean, min, p50, p95, p99, max), throughput, error rate and the latency of every node.
 
-**Reported metrics:** latency (mean, p50, p95, p99, max), throughput and error rate, plus a per-node latency breakdown to pinpoint the main bottleneck — followed by 1–2 concrete optimization proposals.
+**Results** (RTX 5070 Laptop GPU, Ollama with its defaults unless noted, 100 requests unless noted, no errors in any run):
 
-**In place:** the latency statistics and the report format (`agentic_rag.loadtest.runner`). Percentiles use linear interpolation between the closest ranks (the default of `numpy.percentile`), warm-up requests are reported separately, and per-node shares must not add `run_rag_subtask` to the RAG subgraph nodes it ran, because its time includes theirs. The runner follows in Phase 8: it builds the graph once and calls `graph.invoke` from a `ThreadPoolExecutor(max_workers=concurrency)`, the same synchronous path the UI and the evaluation use.
+| Run | Concurrency | Throughput | p50 | p95 |
+|---|---|---|---|---|
+| Fake LLM and embeddings (the framework alone) | 4 | 4 520 / min | 0.01 s | 0.06 s |
+| `qwen2.5:7b-instruct` | 4 | 9.5 / min | 20.2 s | 58.0 s |
+| `qwen3.5:4b`, thinking off (default) | 4 | 12.2 / min | 17.6 s | 35.4 s |
+| `qwen3.5:4b`, one request at a time (50 requests) | 1 | 11.5 / min | 3.6 s | 14.9 s |
+| `qwen2.5:7b-instruct`, Ollama with 4 parallel slots | 4 | 20.0 / min | 10.3 s | 25.0 s |
+| `qwen3.5:4b` without the LLM grading | 4 | 10.7 / min | 18.2 s | 41.4 s |
 
-> 🚧 *To be completed:* results, bottleneck analysis, optimization proposals and the command to reproduce them.
+**Bottleneck:** LLM inference on a server that runs one request at a time. A request makes 5.3 LLM calls on average, which take 99 % of its time; the retrieval takes 20 ms, the tools and the orchestration milliseconds. From one to four concurrent requests the throughput grows by only 6 % while the median latency grows fivefold, because every call waits in Ollama's queue; the GPU is busy all the time.
+
+**Proposals:**
+
+1. **Parallel decoding slots with a model that batches** (measured): `OLLAMA_NUM_PARALLEL=4` doubles the throughput of the 7B transformer (20.0 against 9.5 per minute) and cuts its p95 by 57 %, at the cost of VRAM; Ollama does not batch Qwen3.5's hybrid architecture, so for it the setting changes nothing. A deployment for several users should therefore choose the model together with the serving stack (parallel slots, or continuous batching on a larger GPU).
+2. **Fewer and shorter calls on the critical path:** writing the answer is half of the service time, the verification and its re-plans a fifth. Streaming the answer to the UI and skipping the verification of tool answers, which are shown verbatim anyway, cut what the user waits for. Dropping the relevance grading does not help: it was measured slower (10.7 against 12.2 per minute), because more chunks reach the answer prompt.
+
+[docs/performance.md](docs/performance.md) has the per-node breakdown, the micro-benchmark of the parallel slots and the commands. To reproduce the main run:
+
+```bash
+uv run agentic-rag loadtest --requests 100 --concurrency 4
+```
 
 ## Getting started
 
@@ -190,8 +208,8 @@ OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-m
 - Git.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for local development; it also installs Python 3.12 when it is missing.
 - Docker with Docker Compose 2.24 or newer for the containers (`compose.yaml` uses the optional `env_file` syntax).
-- For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The provisional default model, `qwen2.5:7b-instruct` (4-bit, about 4.7 GB), fits in an 8 GB GPU and also runs on the CPU, more slowly. Measured in the Compose stack with the default `OLLAMA_NUM_CTX=8192`: on the CPU the `ollama` container used 7.7 GB of RAM and answered in 20–60 s; with the GPU override all layers fit in 8 GB of VRAM and warm answers took 3–10 s. Fake mode needs neither a model nor a GPU.
-- Disk space for the full stack: the application image (3.02 GB measured), the Ollama image (9.3 GB), the chat model (4.7 GB), the embedding model and the corpus with its index (about 640 MB together).
+- For real answers, a local LLM served by [Ollama](https://ollama.com/): the Compose service, or Ollama installed on the host. The default model, `qwen3.5:4b` (4-bit, 3.4 GB, thinking off), fits in an 8 GB GPU with room to spare and also runs on the CPU, more slowly; with one request at a time it answered in 3.6 s at the median on an RTX 5070 Laptop GPU. Measured with the former default, the 7B model, in the Compose stack: on the CPU the `ollama` container used 7.7 GB of RAM and answered in 20–60 s; with the GPU override, warm answers took 3–10 s. Fake mode needs neither a model nor a GPU.
+- Disk space for the full stack: the application image (3.02 GB measured), the Ollama image (9.3 GB), the chat model (3.4 GB), the embedding model and the corpus with its index (about 640 MB together).
 
 ### What works today
 
@@ -201,7 +219,7 @@ The foundation and the knowledge base run end to end, but the chatbot does not a
 - the CLI lists its commands and `config` prints the effective settings;
 - `ingest --download` downloads the corpus and builds the vector index, and a plain `ingest` keeps the index in step with the corpus. Measured on the development machine (24-core CPU): the download takes about 25 s, the first build about 6 minutes (embedding the 18 654 chunks with the default model on the CPU), and a repeated `ingest` 8 s, because unchanged chunks are not embedded again. A query against the index takes about 10 ms after the model has loaded (about 11 s);
 - the RAG subgraph answers `invoke({"query": ...})` with a cited context and its sources. In fake mode it skips the model calls; with Ollama it rewrites and grades (measured with Qwen2.5-7B-Instruct on a laptop GPU, see *Design decisions*). A question outside the corpus, such as *What is the capital of France?*, gets an empty context;
-- `eval` runs the question set through the graph or one node and writes the report and its summary; `loadtest` prints the phase it is planned for (`… is planned for Phase 8 (see docs/project-structure-plan.md, section 8)`) and exits with code 1;
+- `eval` runs the question set through the graph or one node, and `loadtest` sends it under load; both write a JSON report and its Markdown summary and print the summary;
 - the main workflow answers: in fake mode with scripted replies that walk every route (a greeting, one search, two parallel searches, a tool call), with Ollama with real answers. Measured with Qwen2.5-7B-Instruct on a laptop GPU, warm: 0.5–3 s for a direct reply, 2–9 s for a tool question, 8–30 s for a question that needs searches (the first search of a process also loads the embedding model, about 16 s); the details are in [docs/architecture.md](docs/architecture.md#measured-with-ollama);
 - the Streamlit UI streams the main workflow: the step panel shows each step as it finishes, groups the parallel ones by LangGraph step and lists under each search the steps of the RAG subgraph (the English search query, the retrieved and the kept chunks), and the retrieved-context panel shows the numbered sources with a link to each page. The empty chat offers one example question per route (a search, a comparison asked in Hungarian, one question per tool), which also work with the fake LLM. A missing index, an index built with other embeddings, an unreachable Ollama and a model that is not pulled are explained in the chat with the fix. A run the user stops gets the turn *Stopped before an answer was produced.*, the agent receives the new question with only the earlier questions that were answered, `$` signs in answers are shown as text (no LaTeX), and invalid settings or an unreadable `.env` replace the chat with an *Invalid configuration* error;
 - from a fresh clone, `docker compose up --build` pulls the chat model, downloads the corpus, builds the index and serves the UI with no other step (measured: 25 minutes for the first start on the development machine, 11 s for a restart); in fake mode a single container is ready in about 45 s.
@@ -247,12 +265,12 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 `uv sync --locked` stops with an error instead of rewriting `uv.lock` when the lock file is out of date with `pyproject.toml`; the image build uses the same check.
 
-The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `800 passed, 1 deselected` (measured on 2026-10-03; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
+The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `807 passed, 1 deselected` (measured on 2026-10-03; the number of passed tests grows with the phases). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
 ```bash
-ollama pull qwen2.5:7b-instruct
+ollama pull qwen3.5:4b
 uv run pytest -m ollama       # live check against the local server; skipped when it is not reachable
 ```
 
@@ -302,7 +320,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; docker compose up --bu
 docker compose -f compose.yaml -f compose.gpu.yaml up --build
 ```
 
-It needs an NVIDIA driver and GPU support in Docker: Docker Desktop with the WSL 2 backend on Windows, or the NVIDIA Container Toolkit on Linux. To make it the default, set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` in `.env` (with `;` as the separator on Windows). Without the override, Ollama runs on the CPU. Measured with the default model: 20–60 s per answer on the CPU, 3–10 s warm on an RTX 5070 Laptop GPU (the first answer also loads the models, about 45 s).
+It needs an NVIDIA driver and GPU support in Docker: Docker Desktop with the WSL 2 backend on Windows, or the NVIDIA Container Toolkit on Linux. To make it the default, set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` in `.env` (with `;` as the separator on Windows). Without the override, Ollama runs on the CPU. Measured with the former default, the 7B model: 20–60 s per answer on the CPU, 3–10 s warm on an RTX 5070 Laptop GPU (the first answer also loads the models, about 45 s).
 
 **Ollama on the host** instead of the `ollama` service:
 
@@ -364,10 +382,10 @@ Real environment variables take precedence over `.env`, and an empty value (`KEY
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama`, or `fake` for the scripted offline model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL of the Ollama server |
-| `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Ollama chat model tag (provisional) |
+| `OLLAMA_MODEL` | `qwen3.5:4b` | Ollama chat model tag (decision 4) |
 | `OLLAMA_NUM_CTX` | `8192` | Context window in tokens, 512–131072, sent as Ollama's `num_ctx`; the prompt and the answer share it, and Ollama silently truncates a longer prompt |
 | `OLLAMA_TIMEOUT_S` | `120.0` | HTTP timeout in seconds of each Ollama request, greater than 0 |
-| `OLLAMA_REASONING` | empty | Thinking mode of reasoning models such as Qwen3.5: `false` turns it off, `true` on, empty keeps the model's default. Thinking made `qwen3.5:4b` about ten times slower in the evaluation |
+| `OLLAMA_REASONING` | `false` | Thinking mode of reasoning models such as Qwen3.5: `false` turns it off, `true` on; models without one ignore it. Thinking made `qwen3.5:4b` about ten times slower in the evaluation, without better answers |
 | `LLM_TEMPERATURE` | `0.0` | Sampling temperature, 0.0–2.0 |
 | `EMBEDDING_PROVIDER` | `huggingface` | `huggingface`, or `fake` for the offline hashing embeddings |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` | Hugging Face embedding model (provisional) |
@@ -393,18 +411,17 @@ In the Compose stack, `compose.yaml` sets `OLLAMA_BASE_URL=http://ollama:11434` 
 | `ingest [--rebuild] [--download] [--sources PATH]` | Build or update the vector index from `DATA_DIR`; with `--download`, first download the corpus sources (needs git) | Now |
 | `export-graph [--graph {all,agent,rag}] [--format {markdown,mermaid}] [--output PATH]` | Mermaid diagrams of the compiled graphs | Now |
 | `eval [--target {graph,node}] [--node NAME] [--dataset PATH] [--output-dir PATH] [--judge-model NAME]` | Functional evaluation: writes a JSON report and its Markdown summary, prints the summary | Now |
-| `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH]` | Load test against the compiled graph | Phase 8 |
+| `loadtest [--requests N] [--concurrency C] [--warmup W] [--output-dir PATH] [--dataset PATH]` | Load test against the compiled graph: writes a JSON report and its Markdown summary, prints the summary | Now |
 
 Exit codes:
 
 - 0 on success;
-- 1 when the command failed: a feature planned for a later phase (`PlannedFeatureError`), a missing corpus and a failed download (`ingest`), and a missing or invalid question set or a missing index (`eval`) print only their message, any other error its traceback;
+- 1 when the command failed: a feature planned for a later phase (`PlannedFeatureError`), a missing corpus and a failed download (`ingest`), and a missing or invalid question set or a missing index (`eval`, `loadtest`) print only their message, any other error its traceback;
 - 2 for usage and configuration errors: invalid arguments (including an `InvalidArgumentError`, such as `eval --node` outside `NODE_TARGETS`), invalid settings, or a `ConfigurationError` (a `.env` that cannot be read or is not UTF-8, an invalid `data/sources.toml`, or an index built with other embeddings, `EmbeddingMismatchError`);
 - 130 when interrupted.
 
 The details are in [docs/architecture.md](docs/architecture.md#errors-and-exit-codes).
 
-> 🚧 *To be completed:* the evaluation and load-test runs (Phases 7–8).
 
 ## Repository structure
 
@@ -462,7 +479,7 @@ agentic-rag-chatbot-poc/
 │       │   ├── metrics.py          # hit@k, routing accuracy, the LLM-judged correctness and faithfulness
 │       │   └── runner.py           # run_evaluation(), the report models and the Markdown summary
 │       ├── loadtest/
-│       │   └── runner.py           # latency statistics and report model; run_load_test() in Phase 8
+│       │   └── runner.py           # run_load_test(), the latency statistics, the report and its summary
 │       └── ui/
 │           ├── app.py              # Streamlit entrypoint
 │           └── components.py       # step panel, retrieved-context panel, failure hints, examples

@@ -424,7 +424,7 @@ def get_chat_model(settings: Settings) -> BaseChatModel:
             # Passed to both the sync and the async httpx client; without it they never time
             # out. LangGraph cannot time out a sync node, so this is the only bound.
             client_kwargs={"timeout": settings.ollama_timeout_s},
-            # Ollama's think option: None keeps the model's default.
+            # Ollama's think option; models without a thinking mode ignore False.
             reasoning=settings.ollama_reasoning,
         )
     if settings.llm_provider == "fake":

@@ -97,9 +97,10 @@ class Settings(BaseSettings):
         "for an Ollama on the host seen from a container http://host.docker.internal:11434.",
     )
     ollama_model: str = Field(
-        default="qwen2.5:7b-instruct",
+        default="qwen3.5:4b",
         min_length=1,
-        description="Ollama chat model tag (provisional default, plan decision 4).",
+        description="Ollama chat model tag (plan decision 4, chosen by the evaluation and the "
+        "load test; run it with OLLAMA_REASONING=false).",
     )
     ollama_num_ctx: int = Field(
         default=8192,
@@ -118,12 +119,13 @@ class Settings(BaseSettings):
         "(connecting, sending, and every wait for response data). Keep it generous: Ollama "
         "queues concurrent requests and may load the model before the first token.",
     )
-    ollama_reasoning: bool | None = Field(
-        default=None,
-        description="Thinking mode of reasoning models such as Qwen3.5: false turns it off, "
-        "true on; empty keeps the model's default. With thinking on, every LLM call writes a "
-        "long hidden reasoning first, which made Qwen3.5-4B about 15 times slower per question "
-        "in the evaluation. Models without a thinking mode ignore it.",
+    ollama_reasoning: bool = Field(
+        default=False,
+        description="Thinking mode of reasoning models such as Qwen3.5, sent as Ollama's "
+        "think option: false (the default) turns it off, true on. With thinking on, every LLM "
+        "call writes a long hidden reasoning first, which made Qwen3.5-4B about ten times "
+        "slower per question in the evaluation, without better answers. Models without a "
+        "thinking mode ignore it.",
     )
     llm_temperature: float = Field(
         default=0.0,
