@@ -267,7 +267,7 @@ Az `uv sync --locked` hibával leáll, ahelyett hogy átírná az `uv.lock` fáj
 
 A tesztek fake módban futnak, és figyelmen kívül hagyják a shell beállításait és a `.env` fájlt. Az egyetlen kivétel az élő Ollama-teszt (`ollama` marker): a sima `uv run pytest` kihagyja (deselect), ezért az összesítés `807 passed, 1 deselected` (2026. 10. 03-án mérve). A letöltési tesztek egy ideiglenes könyvtárban létrehozott git repositoryból töltenek le, és kimaradnak, ha a git nincs telepítve. Az `uv run pytest -m ollama` futtatja, ahogy lent látható.
 
-**CI.** A [`.github/workflows/ci.yml`](.github/workflows/ci.yml) minden pushnál és pull requestnél ugyanezeket az ellenőrzéseket futtatja: `uv sync --locked`, `ruff check`, `ruff format --check` és `pytest` fake módban, majd `docker build` és a képfájl `agentic-rag --version` parancsa. Ehhez nem kell sem modell, sem GPU, sem korpusz.
+**CI.** A [`.github/workflows/ci.yml`](.github/workflows/ci.yml) minden pull requestnél és a `main` ágra küldött minden pushnál ugyanezeket az ellenőrzéseket futtatja: `uv sync --locked`, `ruff check`, `ruff format --check` és `pytest` fake módban, majd `docker build` és a képfájl `agentic-rag --version` parancsa. Ehhez nem kell sem modell, sem GPU, sem korpusz.
 
 **A gépen futó Ollama** a leggyorsabb fejlesztési kör valódi modellel. Az [Ollama](https://ollama.com/download) telepítése és elindítása (az asztali alkalmazással vagy az `ollama serve` paranccsal) után le kell tölteni a modellt; az alapértelmezett `OLLAMA_BASE_URL` (`http://localhost:11434`) eléri:
 

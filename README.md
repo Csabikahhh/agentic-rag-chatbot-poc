@@ -267,7 +267,7 @@ $env:LLM_PROVIDER="fake"; $env:EMBEDDING_PROVIDER="fake"; uv run streamlit run s
 
 The tests run in fake mode and ignore the shell's settings and `.env`. The one exception is the live Ollama test (marker `ollama`): plain `uv run pytest` deselects it, so the summary reads `807 passed, 1 deselected` (measured on 2026-10-03). The download tests fetch from a git repository created in a temporary directory and are skipped when git is not installed. `uv run pytest -m ollama` runs it, as shown below.
 
-**CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same checks on every push and pull request: `uv sync --locked`, `ruff check`, `ruff format --check` and `pytest` in fake mode, then `docker build` and the image's `agentic-rag --version`. No model, GPU or corpus is needed.
+**CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same checks on every pull request and every push to `main`: `uv sync --locked`, `ruff check`, `ruff format --check` and `pytest` in fake mode, then `docker build` and the image's `agentic-rag --version`. No model, GPU or corpus is needed.
 
 **Ollama on the host** is the fastest loop with a real model. Install [Ollama](https://ollama.com/download), start it (the desktop app, or `ollama serve`) and pull the model; the default `OLLAMA_BASE_URL` (`http://localhost:11434`) reaches it:
 
