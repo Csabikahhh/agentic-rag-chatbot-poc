@@ -1,0 +1,1171 @@
+{
+  "created_at": "2026-10-04T19:41:27.584958Z",
+  "settings": {
+    "LLM_PROVIDER": "ollama",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "qwen3.5:4b",
+    "OLLAMA_NUM_CTX": "8192",
+    "OLLAMA_TIMEOUT_S": "120.0",
+    "OLLAMA_REASONING": "false",
+    "LLM_TEMPERATURE": "0.0",
+    "EMBEDDING_PROVIDER": "huggingface",
+    "EMBEDDING_MODEL": "intfloat/multilingual-e5-small",
+    "DATA_DIR": "data/raw",
+    "CHROMA_DIR": "data/chroma_db",
+    "CHROMA_COLLECTION": "documents",
+    "TOP_K": "4",
+    "RETRIEVAL_CANDIDATES": "20",
+    "HYBRID_SEARCH": "true",
+    "GRADE_WITH_LLM": "true",
+    "MAX_RETRIES": "2",
+    "INGEST_ON_START": "true",
+    "LOG_LEVEL": "INFO"
+  },
+  "target": "graph",
+  "node": null,
+  "dataset": "data/eval/holdout.jsonl",
+  "judge_model": "hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",
+  "items": [
+    {
+      "item": {
+        "id": "h01",
+        "question": "In React, I call setCount(count + 1) three times in one handler. Why does it only increment once?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Each call uses the same state snapshot. Use functional updates such as setCount(c => c + 1) three times to queue three increments.",
+        "expected_documents": [
+          "react/reference/react/useState.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": "Calling `setState` with a value (like `setCount(count + 1)`) instead of an updater function queues a request to **replace** the current state entirely. When you call it three times in one handler, React processes these queued updates sequentially during the next render:\n\n1.  The first call sets the state to `count + 1`.\n2.  The second call ignores the previous value and sets the state to `(count + 1) + 1` (effectively replacing it again).\n3.  The third call replaces the state one more time, resulting in only the final increment being applied [4][8].\n\nTo increment the counter three times correctly within a single event handler, you must pass an **updater function** to each `setState` call. This allows React to calculate the next state based on the previous value in the queue:\n\n```js\nsetCount(n => n + 1);\nsetCount(n => n + 1);\nsetCount(n => n + 1);\n```\n\nThis approach ensures that each update builds upon the result of the previous one [1][7].\n\n*Note: this answer may be incomplete: The draft incorrectly claims that calling `setState` with a value (like `setCount(count + 1)`) queues a request to replace the current state entirely and that subsequent calls ignore the previous value. The documentation explicitly states that React processes queued updates sequentially: the first call sets the state to `count + 1`, the second call uses that new value as the base (`n`), and the third uses the result of the second. Therefore, calling `setCount(count + 1)` three times results in `3 * (count + 1)`, not just the final increment. The draft fails to explain this accumulation behavior correctly.*",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/learn/queueing-a-series-of-state-updates.md"
+        ],
+        [
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/reference/react/Component.md",
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/learn/queueing-a-series-of-state-updates.md"
+        ],
+        [
+          "react/reference/react/Component.md",
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/learn/queueing-a-series-of-state-updates.md",
+          "react/reference/react/Component.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": false,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer incorrectly claims that subsequent calls to `setCount(count + 1)` ignore the previous value, which contradicts the reference answer. The reference answer correctly states that each call uses the same state snapshot, leading to the accumulation of increments."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The main claim that calling `setState` with a value queues a request to replace the current state entirely is supported, but the explanation of subsequent calls ignoring the previous value is incorrect. The material correctly states that React processes queued updates sequentially, and the accumulation behavior is explained accurately."
+      },
+      "latency_ms": 55815.14849996893,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h02",
+        "question": "Can I put a function in a Nuxt useState value and preserve it through hydration?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "No. Nuxt useState values are serialized to JSON; functions, classes and symbols are not suitable values.",
+        "expected_documents": [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": "Nem, nem helyezhet el függvényt egy `useState` értékbe, és ez nem megmarad a hidratálás során.\n\nA dokumentáció szerint az `useState` értékei JSON-szerializálásra kerülnek, így **nem tartalmazhatnak olyan elemeket, amelyek nem serializálhatók**, például osztályokat, függvényeket vagy szimbólumokat [1]. Mivel a függvények nem serializálhatók, azok elvesznek az SSR (server-side rendering) során, és nem lesznek elérhetők a kliensoldali hidratálás után.\n\nA megfelelő megoldás egy olyan állapotkezelő használata, amely **SSR-barát**, mint például a `useState` vagy a `useHydration`, de ezekben sem lehet közvetlenül függvényt tárolni az értékhez. A függvényeket általában úgy kell használni, hogy az állapotot inicializálják (pl. egy factory függvénnyel), de az állapot magában nem tartalmazza a függvényt [3].\n\nPélda `useState` használatára, ahol a függvény csak az inicializáláshoz szükséges:\n\n```html\n<template>\n  <div>{{ state }}</div>\n</template>\n\n<script setup>\nconst state = useState('random', () => Math.random())\n</script>\n```\n\nEbben az esetben a `Math.random()` függvény csak akkor fut le, amikor az állapotot először kérjük meg (SSR vagy client-side), de maga az állapot (`state`) egy számszerű érték lesz, amely serializálható és megmarad a hidratálás során.",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/4.api/2.composables/use-hydration.md",
+          "nuxt/3.guide/2.best-practices/hydration.md",
+          "nuxt/4.api/2.composables/use-hydration.md"
+        ]
+      ],
+      "intent_correct": false,
+      "hit_at_k": false,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that functions cannot be used in `useState` values and that they are not preserved through hydration, aligning with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The material supports the claim that `useState` values are JSON-serializable and cannot contain non-serializable elements like functions. However, the example provided in the answer about using `useState` with a function is not directly supported by the material, which suggests using functions only for initialization."
+      },
+      "latency_ms": 14840.645899996161,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h03",
+        "question": "Should a Vue computed getter send a network request whenever it evaluates?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Computed getters should be free of side effects; do not make async requests, mutate other state or the DOM in a getter. Use a watcher for side effects.",
+        "expected_documents": [
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "vue"
+        ],
+        "notes": null
+      },
+      "answer": "No, a Vue computed getter should **not** send network requests whenever it evaluates.\n\nAccording to Vue's best practices, computed getters must be **side-effect free**. Performing side effects like making async requests inside a computed property is explicitly discouraged [3]. Instead, you should use `watchEffect` or other reactive mechanisms to handle such operations when state changes occur.\n\nWhile computed properties are cached based on their dependencies and only re-evaluate when those dependencies change [4], they are designed for pure computation. If a computed property were to perform an async request every time it runs (even if the result hasn't changed), it would violate the principle of being side-effect free and could lead to unnecessary network calls or performance issues.\n\n**Correct approach:**\nUse a `watchEffect` to trigger the request when specific state changes, rather than relying on the computed property itself to perform the request.\n\n```js\n// ❌ Incorrect: Computed should not have side effects\nconst data = computed(() => {\n  fetch('/api/data') // Side effect inside computed!\n  return response\n})\n\n// ✅ Correct: Use watchEffect for side effects\nconst [data, setData] = ref(null)\nwatchEffect(() => {\n  if (someCondition) {\n    fetch('/api/data').then(res => res.json()).then(setData)\n  }\n})\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "vue/guide/best-practices/performance.md",
+          "vue/guide/best-practices/performance.md"
+        ],
+        [
+          "vue/guide/essentials/computed.md",
+          "vue/guide/essentials/computed.md",
+          "vue/guide/best-practices/performance.md",
+          "vue/guide/reusability/composables.md"
+        ],
+        [
+          "vue/guide/best-practices/performance.md",
+          "vue/guide/essentials/reactivity-fundamentals.md",
+          "vue/guide/extras/reactivity-in-depth.md",
+          "vue/guide/best-practices/performance.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately states that computed getters should not perform side effects like network requests, and it correctly advises using `watchEffect` for such operations."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer is fully supported by the material, which explicitly states that computed getters should be side-effect free and should not perform async requests. The material also discusses the use of `watchEffect` for handling side effects."
+      },
+      "latency_ms": 22486.235600023065,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h04",
+        "question": "My React effect starts a browser event listener. How should I stop it when the component disappears?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Return a cleanup function from the effect which removes the listener. React runs cleanup on unmount and before rerunning setup with changed dependencies.",
+        "expected_documents": [
+          "react/reference/react/useEffect.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": "To stop a browser event listener when a React component unmounts, you must return a **cleanup function** from your `useEffect`. This function should call `removeEventListener` with the same arguments used in the setup to unregister the handler.\n\nReact will automatically call this cleanup function once the component is removed from the DOM [10].\n\nHere is an example of how to implement this:\n\n```js\nuseEffect(() => {\n  function handleScroll(e) {\n    console.log(window.scrollX, window.scrollY);\n  }\n  window.addEventListener('scroll', handleScroll);\n  \n  // Cleanup function to stop the listener on unmount\n  return () => window.removeEventListener('scroll', handleScroll);\n}, []);\n```\n\nThis pattern ensures that the event listener is removed when the component disappears [1][2].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/learn/synchronizing-with-effects.md",
+          "react/reference/react/useEffect.md",
+          "react/learn/synchronizing-with-effects.md",
+          "react/learn/separating-events-from-effects.md"
+        ],
+        [
+          "react/reference/react/useEffect.md",
+          "react/reference/react/useEffect.md",
+          "react/reference/react/useEffect.md",
+          "react/reference/react/useEffect.md"
+        ],
+        [
+          "react/learn/synchronizing-with-effects.md",
+          "react/learn/reusing-logic-with-custom-hooks.md",
+          "react/reference/react/useEffect.md",
+          "react/reference/react/useEffect.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that a cleanup function should be returned from the `useEffect` to remove the event listener, and it provides an example that matches the reference answer. It also correctly mentions that React will automatically call this cleanup function when the component unmounts."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material supports the claim that to stop a browser event listener when a React component unmounts, you must return a cleanup function from your `useEffect`. It provides examples and explanations that back up this statement."
+      },
+      "latency_ms": 22752.66370002646,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h05",
+        "question": "Can I call toUpperCase directly on a TypeScript value typed string | number?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "No. The operation must be valid for every union member. Narrow the value to string, for example using typeof, before calling toUpperCase.",
+        "expected_documents": [
+          "typescript/handbook-v2/Everyday Types.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "typescript"
+        ],
+        "notes": null
+      },
+      "answer": "No, you cannot call `toUpperCase()` directly on a value typed as `string | number` without additional checks. TypeScript does not know at compile time which member of the union type (`string` or `number`) is present, so it will reject code that assumes the value has string-specific methods like `toUpperCase()`.\n\nTo use `toUpperCase()`, you must first narrow the type to ensure the value is a `string`. This can be done using a conditional check on `typeof`:\n\n```ts\nfunction printId(id: number | string) {\n  if (typeof id === \"string\") {\n    // In this branch, id is narrowed to 'string'\n    console.log(id.toUpperCase());\n  } else {\n    // Here, id is of type 'number'\n    console.log(id);\n  }\n}\n```\n\nWithout such a check, TypeScript will report an error because `toUpperCase()` is not defined on the `number` member of the union.",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "typescript/handbook-v2/Everyday Types.md",
+          "typescript/handbook-v2/Everyday Types.md",
+          "typescript/handbook-v2/Narrowing.md",
+          "typescript/handbook-v2/Everyday Types.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately states that you cannot call `toUpperCase()` directly on a `string | number` value and provides the correct reason. It also correctly suggests using a conditional check on `typeof` to narrow the type to `string` before calling `toUpperCase()`, which aligns with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer is fully supported by the material, which discusses union types and the need for type narrowing to safely use string-specific methods on a `string | number` union."
+      },
+      "latency_ms": 13118.845999997575,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h06",
+        "question": "Does Nuxt useFetch avoid a second request during hydration? Explain how.",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "useFetch forwards server-fetched data in the Nuxt payload so hydration can reuse it rather than fetching it again. Calling $fetch directly in a component does not provide that transfer on its own.",
+        "expected_documents": [
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nuxt/4.api/2.composables/use-fetch.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": "Yes, **Nuxt's `useFetch` avoids a second request during hydration** by automatically forwarding server-fetched data to the client via the Nuxt payload.\n\nHere is how it works:\n\n1.  **Server-Side Fetch**: When `useFetch` is called in the server environment (SSR), it fetches the data from the API.\n2.  **Payload Injection**: The composable adds the resolved data to the **Nuxt payload** (`__NUXT_DATA__`). This happens even if you do not explicitly await the return value, as Nuxt waits for the request to finish during SSR [4].\n3.  **Client-Side Hydration**: During hydration on the client, the framework checks the payload. If the data is present (meaning it was fetched on the server), `useFetch` uses this existing data instead of making a new network request [1][2].\n\nThis mechanism prevents the \"double fetch\" problem that occurs when using `$fetch` directly in the setup function, which would trigger a request on both the server and the client [2].\n\n**Code Example:**\nThe following example demonstrates how `useFetch` handles hydration without a second request:\n\n```vue\n<script setup>\n// Data is fetched on the server and sent to the payload.\n// No second request occurs during hydration.\nconst { data } = useFetch('/api/data')\n</script>\n\n<template>\n  <div>{{ data }}</div>\n</template>\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nuxt/4.api/2.composables/use-fetch.md",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nuxt/4.api/2.composables/use-fetch.md",
+          "nuxt/4.api/2.composables/use-fetch.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately states that Nuxt's `useFetch` avoids a second request during hydration by forwarding server-fetched data via the Nuxt payload, and it correctly explains the mechanism without contradicting the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer is fully supported by the material, which explains how `useFetch` avoids a second request during hydration by storing the data in the Nuxt payload and using it on the client side."
+      },
+      "latency_ms": 13945.970900007524,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h07",
+        "question": "Miért nem változik meg rögtön a React state változó értéke a setter meghívása után?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A setter a következő rendereléshez kér állapotfrissítést. Az aktuális eseménykezelő a jelenlegi render állapotának pillanatképét látja.",
+        "expected_documents": [
+          "react/reference/react/useState.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "hungarian",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": "A React állapottáblázatok (state) nem változnak rögtön, mert az állapotváltoztatás egy **kérésről** (request), nem pedig azonnali parancsról szól [3]. A rendszer a következő lépéseket végzi el:\n\n1.  **Kérés benyújtása:** Amikor meghívod a `setState`-t vagy a `useState` setterét, ez csak egy kérést küld Reactnek, hogy frissítse az állapotot. Azonnali változás nem történik [3].\n2.  **Batching (összeállítás):** Ha több komponens is reagál egy eseményre, React összefoglalja (batch) az összes frissítést, és egyetlen passzban végrehajtja őket a lezárt eseményciklus végén [3].\n3.  **Újrafelületelés (Re-render):** Az állapotváltoztatás nem módosítja azonnal a meglévő változó értékét, hanem indít el egy újrafelületelést. A komponens csak akkor látja meg a változást, amikor ez a passz befejeződik [4].\n4.  **Azonnali olvasás veszélye:** Mivel az állapot nem frissül azonnal, ha közvetlenül a `setState` hívása után próbálsz elolvasni az állapotot (pl. egy callbackban), akkor még mindig az \"eltűnt\" állapotot látod [3].\n\n**Példa a hibás vs. helyes megközelítésre:**\nHa mutálod az objektumot közvetlenül, és azt adod vissza a setternek, React figyelmen kívül hagyja a frissítést, mert az új állapot megegyezik az előzővel (Object.is összehasonlítás alapján) [2].\n\n```js\n// ❌ Hiba: Mutálás történik, nem jön létre új objektum\nsetObj(obj); // Ez semmit nem csinál\n\n// ✅ Helyes: Új objektum létrehozása\nsetObj({ ...obj, x: 10 }); \n```\n\nHa azonnal szeretnéd látni a változást (pl. egy callbackban), használhatod a `setState` callback argumentumát, amely garantáltan lefut az állapot frissítése után [3].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/learn/updating-objects-in-state.md",
+          "react/reference/react/useState.md",
+          "react/reference/react/Component.md",
+          "react/learn/state-as-a-snapshot.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes why the React state does not change immediately after calling the setter, aligning with the reference answer. It explains the batching process, re-rendering, and the importance of using the callback form of `setState` for immediate updates."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the provided material, including the explanation of state updates as requests, batching, re-renders, and the example of correct vs. incorrect state updates."
+      },
+      "latency_ms": 16255.166199989617,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h08",
+        "question": "Mikor kell .value a Vue computed eredményének olvasásához?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "JavaScript kódban a computed ref értékét .value-val olvassuk. A Vue sablonjában a ref automatikusan kicsomagolódik.",
+        "expected_documents": [
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "hungarian",
+          "vue"
+        ],
+        "notes": null
+      },
+      "answer": "A `.value`-t akkor kell használni, ha a **template kifejezésen kívül** (pl. JavaScript kódban) olvasod ki a computed eredményét, mivel a `computed()` függvény visszaad egy **computed ref**-et, amelynek értéke csak `.value`-vel érhető el [1].\n\nA template-ben azonban a Vue automatikusan felcsomagolja (auto-unwraps) az értéket, így ott nem kell `.value`-t használni [1].\n\nPélda kód a kódban történő olvasáshoz:\n```javascript\nconst value = publishedBooksMessage.value // Itt szükséges a .value\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "vue/guide/essentials/computed.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that .value is needed when accessing a computed property outside of the template, and provides a relevant example. It also mentions that in the template, Vue automatically unwraps the value, which is consistent with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The main claims are supported, but the material does not explicitly state that computed properties are auto-unwrapped in templates, only that they can be accessed without `.value` in template expressions."
+      },
+      "latency_ms": 11997.655299957842,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h09",
+        "question": "I am moving a React counter to Nuxt. Can I keep destructuring useState into [count, setCount]?",
+        "history": [],
+        "expected_document_groups": [
+          [
+            "react/reference/react/useState.md"
+          ],
+          [
+            "nuxt/4.api/2.composables/use-state.md"
+          ]
+        ],
+        "reference_answer": "No. React useState returns a state value and setter pair. Nuxt useState returns an SSR-friendly shared ref identified by a key; it does not return the React pair.",
+        "expected_documents": [
+          "react/reference/react/useState.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "holdout",
+          "english",
+          "comparison"
+        ],
+        "notes": null
+      },
+      "answer": "No, you cannot destructure `useState` into `[count, setCount]` when moving a React counter hook to Nuxt because Nuxt's `useState` composable returns a single reactive value (a `Ref`), not an array containing both the state and a setter function.\n\nIn React, `useState` returns an array `[state, setState]`, which allows destructuring:\n```js\nconst [count, setCount] = useState(0); // Returns an array\n```\n[4][7][8]\n\nIn Nuxt, `useState` returns a single reactive reference. You must assign it to a variable and access the value via `.value` if needed; there is no separate setter function returned by the composable itself.\n```ts\nconst count = useState('counter', () => 0) // Returns a Ref<number>\n// To update, you would typically use nuxtApp.payload.state.count = newValue\n```\n[1][9][12]\n\nNuxt's `useState` is designed to return a single reactive value that persists across server-side rendering and components. It does not provide the dual `[state, setState]` pattern found in React hooks.\n\n*Note: this answer may be incomplete: The draft incorrectly states that Nuxt's useState returns a Ref without a setter function. Excerpt [12] explicitly shows usage: `const count = useState('counter', () => Math.round(Math.random() * 100))`. While the return type is a Ref (Excerpt [9]), the documentation does not explicitly state there is 'no separate setter function' in the way described, nor does it explain how to update the value (which typically involves accessing `.value` on the returned Ref or using `nuxtApp.payload.state`). The draft claims 'there is no separate setter function returned by the composable itself', which contradicts the standard Vue/Nuxt reactivity pattern where the Ref object itself acts as the state holder, but the specific phrasing about the lack of a dedicated setter function is not explicitly supported by the provided text which focuses on serialization and SSR behavior rather than the internal API structure of the return value.*",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/2.directory-structure/1.app/1.composables.md",
+          "nuxt/3.guide/4.modules/3.recipes-basics.md",
+          "react/learn/state-a-components-memory.md"
+        ],
+        [
+          "react/learn/extracting-state-logic-into-a-reducer.md",
+          "react/learn/extracting-state-logic-into-a-reducer.md",
+          "react/reference/react/useState.md",
+          "react/reference/react/useState.md"
+        ],
+        [
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/1.getting-started/17.testing.md",
+          "nuxt/4.api/2.composables/use-nuxt-app.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        [
+          "vue/guide/extras/reactivity-transform.md",
+          "vue/guide/reusability/composables.md",
+          "vue/api/reactivity-utilities.md"
+        ],
+        [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        [
+          "vue/guide/essentials/reactivity-fundamentals.md",
+          "vue/guide/extras/reactivity-transform.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly states that Nuxt's `useState` returns a single reactive value (a `Ref`), which contradicts the reference answer. However, it also includes additional details and a claim that contradicts the reference answer, such as the statement that Nuxt's `useState` does not provide a separate setter function, which is not accurate according to the reference answer."
+      },
+      "complete_evidence_at_k": true,
+      "faithfulness": {
+        "score": 0.0,
+        "rationale": "The main claim that Nuxt's `useState` composable does not return a setter function and cannot be destructured into `[count, setCount]` is not fully supported by the material. While the material discusses the return type and usage of `useState`, it does not explicitly state that there is no separate setter function. Excerpt [12] shows usage that implies a setter-like behavior through the `.value` property."
+      },
+      "latency_ms": 48163.25119999237,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h10",
+        "question": "Compare the lifetime and cleanup of a React useEffect with the caching behavior of a Vue computed property.",
+        "history": [],
+        "expected_document_groups": [
+          [
+            "react/reference/react/useEffect.md"
+          ],
+          [
+            "vue/guide/essentials/computed.md"
+          ]
+        ],
+        "reference_answer": "React useEffect synchronizes with external systems, with cleanup before reruns and on unmount. Vue computed derives and caches a value based on reactive dependencies and its getter should be free of side effects.",
+        "expected_documents": [
+          "react/reference/react/useEffect.md",
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "holdout",
+          "english",
+          "comparison"
+        ],
+        "notes": null
+      },
+      "answer": "### React `useEffect` Lifetime and Cleanup\n\nIn React, the `useEffect` hook manages side effects with a specific lifecycle involving setup and cleanup phases.\n\n*   **Execution Order:** When a component commits (renders), React runs the `setup` function first. After every commit where dependencies have changed, React runs the `cleanup` function (if provided) with the old values before running the `setup` function with new values [3].\n*   **Unmount Behavior:** After the component is removed from the DOM, React runs the cleanup function one final time [1][3].\n*   **Re-render Behavior:** The cleanup function also runs before every re-render if dependencies have changed. For example, if a `roomId` prop changes from `\"general\"` to `\"travel\"`, React disconnects from the `\"general\"` room (cleanup) before connecting to the `\"travel\"` room (setup) [4].\n*   **Mount Behavior:** In development, React runs the setup and cleanup logic one extra time immediately after the component mounts [1].\n\n**Example of Symmetrical Cleanup:**\nThe cleanup logic should be symmetrical to the setup logic, stopping or undoing whatever was done in the setup phase. If you only have cleanup logic without corresponding setup logic, it is considered a code smell [1]:\n\n```js\nuseEffect(() => {\n  const connection = createConnection(serverUrl, roomId);\n  connection.connect();\n  return () => {\n    connection.disconnect(); // Stops synchronizing\n  };\n}, [roomId]);\n```\n\n### Vue Computed Property Caching Behavior\n\nVue's `computed` properties differ significantly from React's `useEffect` regarding execution frequency and caching.\n\n*   **Caching Mechanism:** A computed property is cached based on its reactive dependencies. It will only re-evaluate when one of its reactive dependencies changes [6].\n*   **No Automatic Cleanup:** Unlike `useEffect`, there is no explicit \"cleanup\" phase in a Vue computed property. The function is not called again unless its dependencies change; it simply returns the previously cached result.\n*   **Comparison with Methods:** In contrast, a method invocation (a regular function) will **always** run whenever a re-render happens, regardless of whether its inputs have changed [5][6].\n\n**Example of Non-Reactive Dependency:**\nA computed property will never update if it depends on non-reactive values like `Date.now()`:\n\n```js\n// This will never update because Date.now() is not reactive\ncomputed: {\n  now() {\n    return Date.now()\n  }\n}\n```\n\n### Summary Comparison\n\n| Feature | React `useEffect` | Vue `Computed` |\n| :--- | :--- | :--- |\n| **Trigger** | Runs on mount, unmount, and whenever dependencies change. | Runs only when reactive dependencies change. |\n| **Cleanup** | Explicit cleanup function runs before re-renders (with new deps) and on unmount [3]. | No explicit cleanup; simply returns cached value until deps change. |\n| **Re-render Cost** | Executes setup logic again if deps changed; cleanup runs first to undo old state [4]. | Avoids re-execution of the getter function entirely if dependencies are unchanged [6]. |\n| **Alternative** | N/A (Side effects require `useEffect`). | Use a method instead if you do not want caching behavior [5]. |",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "react/reference/react/useEffect.md",
+          "react/learn/lifecycle-of-reactive-effects.md",
+          "react/reference/react/useEffect.md",
+          "react/learn/lifecycle-of-reactive-effects.md"
+        ],
+        [
+          "vue/guide/essentials/computed.md",
+          "vue/guide/essentials/computed.md",
+          "vue/guide/essentials/computed.md",
+          "vue/guide/best-practices/performance.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes the lifetime and cleanup of React `useEffect` and the caching behavior of Vue computed properties, aligning with the reference answer. It does not contradict any key facts and provides a detailed comparison."
+      },
+      "complete_evidence_at_k": true,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer accurately reflects the material provided, covering the lifecycle of `useEffect` in React, including setup and cleanup phases, and the caching behavior of Vue computed properties. All claims are supported by the material."
+      },
+      "latency_ms": 23078.12769996235,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h11",
+        "question": "Next.js App Routerből Nuxtba költözöm. Ugyanúgy egy async Server Componentben kell fetch-et hívnom?",
+        "history": [],
+        "expected_document_groups": [
+          [
+            "nextjs/01-getting-started/06-fetching-data.mdx",
+            "nextjs/03-api-reference/04-functions/fetch.mdx"
+          ],
+          [
+            "nuxt/1.getting-started/10.data-fetching.md",
+            "nuxt/4.api/2.composables/use-fetch.md"
+          ]
+        ],
+        "reference_answer": "A Next.js App Routerben async Server Componentben lehet await fetch-et használni. Nuxtban a useFetch vagy useAsyncData kompozíciós függvények kezelik a szerveroldali adatlekérést és a hidratáláskor újrafelhasználható payloadot.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nuxt/4.api/2.composables/use-fetch.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "holdout",
+          "hungarian",
+          "comparison"
+        ],
+        "notes": null
+      },
+      "answer": "Igen, ugyanúgy kell **async** függvényként definiálnod a komponenttedet és **await**-ni a `fetch` hívást, mint az Next.js App Routerben [1][2].\n\nA Nuxtban azonban nem közvetlenül a `$fetch`-t használhatod aszinkronan egy komponensben (mint Next.jsben), mert ez duplán letölti az adatot: egyszer szerveroldali, majd újra hydráláskor client oldali [5][7]. Ehelyett a Nuxtban a `useFetch` vagy `useAsyncData` composables használata javasolt, amelyek biztosítják, hogy a szerverről lekért adat átadódjon a kliensnek (payloadon keresztül), így elkerülve a dupla lekérést [5][6][8].\n\n**Példa Next.js App Routerben:**\n```tsx\nexport default async function Page() {\n  const data = await fetch('https://api.vercel.app/blog')\n  const posts = await data.json()\n  return <ul>{posts.map((post) => <li key={post.id}>{post.title}</li>)}</ul>\n}\n```\n\n**Példa Nuxtban (helyett használandó):**\n```vue\n<script setup lang=\"ts\">\nconst { data } = await useFetch('/api/item')\n</script>\n<template>\n  <div>{{ data }}</div>\n</template>\n```",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx",
+          "nextjs/04-glossary.mdx"
+        ],
+        [
+          "nuxt/4.api/3.utils/$fetch.md",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nuxt/4.api/3.utils/$fetch.md",
+          "nuxt/3.guide/2.best-practices/performance.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that in Next.js, you need to use `await` with `fetch` in an async Server Component, and it also correctly explains that in Nuxt, you should use `useFetch` or `useAsyncData` instead of directly using `$fetch` to avoid double fetching. The examples provided are also accurate."
+      },
+      "complete_evidence_at_k": true,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The material supports the part about using async functions and await for fetching data in both Next.js and Nuxt. However, it does not explicitly state that you cannot use `$fetch` directly in a component in Nuxt without `useAsyncData`, nor does it provide the exact Nuxt example given in the answer."
+      },
+      "latency_ms": 19189.278699981514,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h12",
+        "question": "Can that hold a class instance?",
+        "history": [
+          {
+            "role": "user",
+            "content": "I am using Nuxt useState for shared state."
+          },
+          {
+            "role": "assistant",
+            "content": "Nuxt useState creates an SSR-friendly shared ref identified by a key."
+          }
+        ],
+        "expected_document_groups": [],
+        "reference_answer": "No. Nuxt serializes useState to JSON, so class instances should not be stored there.",
+        "expected_documents": [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "english",
+          "follow-up"
+        ],
+        "notes": null
+      },
+      "answer": "No, `useState` cannot hold a class instance directly because it serializes data to JSON, which does not support classes [2][3].\n\nTo store a class instance with `useState`, you must use `definePayloadPlugin` to add a custom serializer and deserializer for your classes [1]. Alternatively, you can manage the state in a plugin using `useHydration` as shown below:\n\n```ts\nexport default defineNuxtPlugin((nuxtApp) => {\n  const myStore = new MyStore()\n\n  useHydration(\n    'myStoreState',\n    () => myStore.getState(),\n    data => myStore.setState(data),\n  )\n})\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/4.api/2.composables/use-hydration.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The assistant accurately states that `useState` cannot hold a class instance directly due to JSON serialization, and provides additional context and alternative solutions as mentioned in the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The main claims about `useState` not being able to hold class instances directly and the necessity of using `definePayloadPlugin` are supported. However, the example using `useHydration` is not directly supported by the material, which discusses `useState` and `definePayloadPlugin` but does not provide an example of `useHydration`."
+      },
+      "latency_ms": 11954.476499988232,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h13",
+        "question": "És a sablonban is kell hozzá .value?",
+        "history": [
+          {
+            "role": "user",
+            "content": "A Vue computed tulajdonságáról kérdezek."
+          },
+          {
+            "role": "assistant",
+            "content": "A computed egy reaktív függőségek alapján gyorsítótárazott refet ad vissza."
+          }
+        ],
+        "expected_document_groups": [],
+        "reference_answer": "Nem. A Vue sablonja automatikusan kicsomagolja a computed ref értékét; JavaScript kódban kell a .value.",
+        "expected_documents": [
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "holdout",
+          "hungarian",
+          "follow-up"
+        ],
+        "notes": null
+      },
+      "answer": "Igen, a sablonban (template) is szükséges `.value` a computed property esetén, ha azt közvetlenül használod az adatokhoz való hozzáféréshez, mivel a template kifejezésekben automatikusan lecsomagolják (auto-unwrap) a `computed ref` értékeit.\n\nA dokumentáció szerint:\n> \"Computed refs are also auto-unwrapped in templates so you can reference them without `.value` in template expressions.\" [2]\n\nEz azt jelenti, hogy ha egy sablonban használod a computed property nevét (pl. `{{ publishedBooksMessage }}`), akkor nem kell hozzá `.value`-t írni; a Vue automatikusan lekéri az értéket. Ha viszont programozási kontextusban (pl. `<script>` vagy adatok manipulálása) szeretnéd elérni az értéket, ott már szükséges a `.value` tulajdonság.\n\nPélda sablonból:\n```vue\n<template>\n  <p>{{ publishedBooksMessage }}</p> <!-- Nincs szükség .value-ra -->\n</template>\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "vue/guide/components/v-model.md",
+          "vue/guide/essentials/computed.md",
+          "vue/guide/essentials/computed.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly states that computed properties are auto-unwrapped in templates and that .value is needed in programmatic contexts. However, it contradicts the reference answer by stating that the documentation covers the question, while the reference answer says it does not."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The main claim that in the template, you don't need `.value` for computed properties is supported by the material. However, the claim that you need `.value` in a programmatic context is not directly supported by the material, which only mentions that computed properties are getter-only by default and can be made writable, but does not explicitly state that `.value` is required in such contexts."
+      },
+      "latency_ms": 13267.56090001436,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h14",
+        "question": "Which useState API should I use? I have not chosen a framework yet.",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Ask which framework or explain the distinction: React useState is a component-state hook returning a pair, while Nuxt useState is a keyed SSR-friendly shared ref. Do not assume one framework.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "english",
+          "ambiguity"
+        ],
+        "notes": "A clarification is valid without retrieval, so this item checks answer behavior only."
+      },
+      "answer": "Based on the provided documentation, you should use the **`useState`** composable for creating reactive and SSR-friendly shared state across components in Nuxt.\n\nThe `useState` API is designed to be an SSR-friendly replacement for `ref`, ensuring data persists after server-side rendering [3][5]. It supports two main usage patterns:\n1.  **With a key:** To ensure proper de-duplication across requests [4].\n2.  **Without a key:** A unique key is automatically generated based on the file and line number [4].\n\nHere is a simple code example of how to use it directly or via a composable:\n\n```ts\n// Direct usage\nconst foo = useState('foo', () => 'bar')\n\n// Via a composable (Method 1)\nexport const useFoo = () => {\n  return useState('foo', () => 'bar')\n}\n```\n\n**Important:** Since `useState` data is serialized to JSON, it cannot contain classes, functions, or symbols [3].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nuxt/3.guide/5.recipes/3.custom-usefetch.md",
+          "nuxt/4.api/2.composables/use-nuxt-app.md",
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        [
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/2.directory-structure/1.app/1.composables.md",
+          "nuxt/4.api/2.composables/use-nuxt-app.md"
+        ]
+      ],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer contradicts the reference answer by assuming a specific framework (Nuxt) and provides details that are not relevant to the question of which `useState` API to use without choosing a framework."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the provided documentation, including the usage patterns and the importance of serialization."
+      },
+      "latency_ms": 22362.24729998503,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h15",
+        "question": "Is the Nuxt 3/4 useState composable guaranteed to work unchanged in Nuxt 2?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Do not claim that current Nuxt documentation establishes Nuxt 2 compatibility. State the version boundary and request the Nuxt 2 setup or version-specific documentation.",
+        "expected_documents": [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "english",
+          "version-boundary"
+        ],
+        "notes": null
+      },
+      "answer": "No, the Nuxt 3/4 `useState` composable is **not guaranteed** to work unchanged in Nuxt 2 due to differences in default behavior regarding state clearing.\n\nIn Nuxt 5 (and likely Nuxt 3/4 depending on specific config), `clearNuxtState` resets state to its initial value by default. In contrast, older versions (like Nuxt 2) set cleared state to `undefined`. This change requires code that checks for `undefined` after clearing to be updated to check for the initial value instead [3].\n\nTo maintain the previous behavior in newer versions where this is the default, you must explicitly disable the reset feature:\n\n```ts\nexport default defineNuxtConfig({\n  experimental: {\n    defaults: {\n      useState: {\n        resetOnClear: false, // Required to match Nuxt 2 behavior\n      },\n    },\n  },\n})\n```\n\nThis configuration option is part of the `experimental.defaults` module which controls how `useState` behaves [3][10].\n\n*Note: this answer may be incomplete: The draft claims that Nuxt 5 resets state to its initial value by default (supported by [3] and [10]), but it incorrectly generalizes this behavior to Nuxt 3/4 as a 'likely' scenario without evidence. The provided material only discusses the change in Nuxt 5; there is no information confirming that Nuxt 3 or 4 share this specific default behavior or lack of guarantee for unchanged usage compared to Nuxt 2. Additionally, the draft mentions `experimental.defaults` controlling the behavior [3][10], but the material does not explicitly state that this configuration option exists in Nuxt 3/4, only that it is relevant to the Nuxt 5 migration.*",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/1.getting-started/11.state-management.md"
+        ],
+        [
+          "nuxt/1.getting-started/18.upgrade.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        [
+          "nuxt/4.api/2.composables/use-nuxt-data.md",
+          "nuxt/4.api/2.composables/use-nuxt-data.md",
+          "nuxt/4.api/2.composables/use-nuxt-data.md",
+          "nuxt/4.api/2.composables/use-nuxt-data.md"
+        ],
+        [
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/1.getting-started/11.state-management.md"
+        ],
+        [
+          "nuxt/1.getting-started/18.upgrade.md",
+          "nuxt/1.getting-started/18.upgrade.md",
+          "nuxt/4.api/3.utils/clear-nuxt-state.md",
+          "nuxt/4.api/3.utils/clear-nuxt-state.md"
+        ]
+      ],
+      "intent_correct": null,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer contradicts the reference answer by claiming that the `useState` composable is not guaranteed to work unchanged in Nuxt 2, which is not stated in the reference answer. The reference answer advises against making such claims and instead suggests checking the version-specific documentation."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.0,
+        "rationale": "The material does not provide information about the behavior of `useState` in Nuxt 3 or 4, nor does it discuss the `experimental.defaults` configuration option in those versions. The claims about the behavior differences between Nuxt 2, 3, 4, and 5 are not supported by the given material."
+      },
+      "latency_ms": 33091.106099949684,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h16",
+        "question": "Can I use an App Router async Server Component example unchanged in the Next.js Pages Router?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "No. The cited async Server Component pattern is specific to the App Router. Do not treat it as a Pages Router page-data API; distinguish routers and ask for the target setup if needed.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx"
+        ],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "english",
+          "version-boundary"
+        ],
+        "notes": null
+      },
+      "answer": "No, you cannot use an App Router async Server Component example unchanged in the Next.js Pages Router. The two routing systems have fundamentally different architectures and APIs.\n\nKey differences preventing direct usage:\n\n1.  **Component Lifecycle**: In the Pages Router, server components are not `async` by default; they run synchronously during the initial request. Async functions in Pages Router pages typically require specific configuration (like `getStaticProps`) or are client-side only unless explicitly marked as server components with `use cache`, which behaves differently than App Router's native async Server Components [8].\n2.  **Route Parameters**: The method for accessing route parameters differs significantly. In the Pages Router, you use `getStaticPaths` and pass data via props to your page component. In the App Router, you access parameters directly within the async function using `await params` or via `next/root-params` [3][6].\n3.  **Configuration**: The Pages Router relies on `getStaticPaths` for dynamic routes, whereas the App Router uses `generateStaticParams` which has different behavior (e.g., it is not called again during ISR revalidation) [9].\n\nExample of an App Router pattern that does not work directly in Pages Router:\n```tsx\n// This 'async' function and 'await params' syntax is specific to App Router\nexport default async function Page({ params }: PageProps<'/blog/[slug]'>) {\n  const { slug } = await params // ❌ Not supported in standard Pages Router pages\n  return <h1>Blog post: {slug}</h1>\n}\n```\n\nIn the Pages Router, you would instead use `getStaticPaths` and pass `props.params` (which is synchronous) to your page component [7][8].\n\n*Note: this answer may be incomplete: The draft claims that async functions in Pages Router pages 'typically require specific configuration' or are 'client-side only unless explicitly marked as server components with use cache'. This contradicts the provided material which states in excerpt [1] that the Pages Router (introduced in v13) is 'built on top of React Server Components' and implies native async support. The draft also incorrectly cites excerpt [8] to support the claim about `use cache` behavior, whereas excerpt [8] only shows an example of using `'use cache'` inside a dynamic segment component within App Router context, not as a general rule for Pages Router pages.*",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nextjs/04-glossary.mdx",
+          "nextjs/03-api-reference/04-functions/use-pathname.mdx",
+          "nextjs/03-api-reference/04-functions/next-root-params.mdx",
+          "nextjs/03-api-reference/04-functions/use-pathname.mdx"
+        ],
+        [
+          "nextjs/02-guides/public-static-pages.mdx"
+        ],
+        [
+          "nextjs/02-guides/internationalization.mdx",
+          "nextjs/01-getting-started/03-layouts-and-pages.mdx",
+          "nextjs/03-api-reference/04-functions/next-root-params.mdx",
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx"
+        ],
+        [
+          "nextjs/03-api-reference/04-functions/generate-static-params.mdx"
+        ]
+      ],
+      "intent_correct": null,
+      "hit_at_k": false,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly identifies that the App Router's async Server Component example cannot be used unchanged in the Pages Router and provides key differences. However, it includes incorrect information and contradicts the reference answer on the main point regarding the Pages Router's support for async functions and the use of `use cache`."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.0,
+        "rationale": "The answer contradicts the material, which states that the Pages Router is built on top of React Server Components and supports async functions. Additionally, the answer incorrectly cites an excerpt that only applies to the App Router context, not the Pages Router."
+      },
+      "latency_ms": 33155.60739999637,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h17",
+        "question": "Check the contrast of #000000 text against #ffffff for normal text.",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The contrast is 21:1, passing WCAG AA and AAA for normal text.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "holdout",
+          "english",
+          "tool"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 21.00:1 for #000000 on #ffffff (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): passes\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): passes\n- AAA large text (at least 4.5:1): passes\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer states the correct contrast ratio and passes for WCAG AA and AAA for normal text, matching the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the material."
+      },
+      "latency_ms": 6785.839600022882,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h18",
+        "question": "Mi a #ffffff szöveg kontrasztja #ffffff háttéren?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A kontraszt 1:1, ezért sem normál, sem nagy szövegre nem felel meg a WCAG AA vagy AAA követelményeinek.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "holdout",
+          "hungarian",
+          "tool"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 1.00:1 for #ffffff on #ffffff (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): fails\n- AA large text (at least 3:1): fails\n- AAA normal text (at least 7:1): fails\n- AAA large text (at least 4.5:1): fails\n- AA UI components and graphics (at least 3:1): fails\nLarge text is at least 24px, or at least 18.66px and bold.\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer states that the contrast ratio is 1:1, which contradicts the reference answer that states the contrast is 1:1 and does not meet WCAG AA or AAA standards."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the material."
+      },
+      "latency_ms": 6756.540800037328,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h19",
+        "question": "Which has greater specificity: .card.active or #main?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": ".card.active has specificity (0,2,0); #main has (1,0,0), so #main is more specific.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "holdout",
+          "english",
+          "tool"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`css_specificity`):\n\n```text\nSpecificity (a, b, c): a counts ID selectors; b classes, attribute selectors and pseudo-classes; c type selectors and pseudo-elements.\n- `.card.active`: (0, 2, 0)\n- `#main`: (1, 0, 0)\n`#main` has the highest specificity (1, 0, 0) and wins.\nSpecificity only decides between declarations of the same origin, importance and cascade layer: !important, layers and inline styles take precedence.\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states the specificity values for both selectors and concludes that #main is more specific, which aligns with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The tool result exactly matches the information provided in the material."
+      },
+      "latency_ms": 6747.8897999972105,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h20",
+        "question": "Does Safari 15.3 support the CSS :has() selector?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "No. Safari support starts at 15.4.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "holdout",
+          "english",
+          "tool",
+          "version-boundary"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`browser_support`):\n\n```text\nBrowser support of css.selectors.has (MDN browser-compat-data):\n- Chrome: since 105\n- Edge: since 105\n- Firefox: since 121\n- Safari: since 15.4\n- Chrome Android: since 105\n- Safari on iOS: since 15.4\nSafari 15.3: not supported (added in 15.4).\nMDN: https://developer.mozilla.org/docs/Web/CSS/Reference/Selectors/:has\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer states that Safari 15.3 does not support the :has() selector, but the reference answer clearly states that Safari support starts at 15.4."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The tool result exactly matches the information provided in the material."
+      },
+      "latency_ms": 7141.526099992916,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h21",
+        "question": "What revenue did my employer make last quarter?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The documentation corpus does not contain private employer revenue. State that it cannot answer from its sources; do not invent a number.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "english",
+          "out-of-scope"
+        ],
+        "notes": null
+      },
+      "answer": "No information is available to answer your question, as no documentation excerpts were found regarding your employer's revenue or financial performance.",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        []
+      ],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately states that no information is available to answer the question, matching the reference answer's stance that the documentation does not contain the required information."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer states that no documentation excerpts were found, which aligns with the provided material (none)."
+      },
+      "latency_ms": 9988.706200034358,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h22",
+        "question": "Mi lesz a holnapi lottósorsolás eredménye?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A források nem tartalmazzák ezt az információt, és a jövőbeli sorsolás eredményét nem lehet megadni. Ne találjon ki számokat.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "hungarian",
+          "out-of-scope"
+        ],
+        "notes": null
+      },
+      "answer": "Nincs elérhető dokumentáció vagy információ a holnapi lottósorsolás eredményéről, így ezt nem tudom megmondani.",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        []
+      ],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that there is no available documentation or information about the lottery draw results for the upcoming draw, which aligns with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer states that there is no available documentation or information about today's lottery draw results, which is consistent with the provided material, as there is no material to contradict or support this statement."
+      },
+      "latency_ms": 10406.72369999811,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h23",
+        "question": "Show the official React useQuantumState hook signature.",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Do not invent an API signature. State that the indexed React documentation does not establish an official useQuantumState hook.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "holdout",
+          "english",
+          "unsupported-api"
+        ],
+        "notes": null
+      },
+      "answer": "The provided documentation excerpts do not contain the official signature for a `useQuantumState` hook. They only show examples of using the `useSyncExternalStore` hook.\n\nBased on the code examples in [1] and [2], the usage pattern for `useSyncExternalStore` is:\n\n```js\nconst value = useSyncExternalStore(subscribe, getSnapshot);\n```\n\nWhere:\n- `subscribe` is a function that accepts a callback and returns an unsubscribe function.\n- `getSnapshot` is a function that returns the current state value.",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/reference/react/useSyncExternalStore.md",
+          "react/reference/react/useSyncExternalStore.md"
+        ]
+      ],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 0.0,
+        "rationale": "The answer contradicts the reference answer by providing information about `useSyncExternalStore` instead of stating that the official documentation does not cover `useQuantumState`."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material in both excerpts supports the description of the usage pattern for `useSyncExternalStore`, and there is no mention of an `useQuantumState` hook."
+      },
+      "latency_ms": 11709.176100033801,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "h24",
+        "question": "Check #000 on #fff contrast, then explain how React useState can store a selected theme name.",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The contrast tool must report 21:1 and AA/AAA pass. React useState can hold the theme string and returns a setter to update it; support the React explanation with documentation.",
+        "expected_documents": [
+          "react/reference/react/useState.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "holdout",
+          "english",
+          "mixed-tool-retrieval"
+        ],
+        "notes": null
+      },
+      "answer": "The contrast ratio for **#000 on #fff** is **21.00:1**, which passes all WCAG guidelines including AAA normal text [Tool results].\n\nTo store a selected theme name using `useState`, you declare a state variable in the parent component and pass its value to a context provider. Child components then read this value via `useContext`. Here is an example:\n\n```tsx\nimport { useState, createContext, useContext } from 'react';\n\nconst ThemeContext = createContext('light');\n\nexport default function App() {\n  const [theme, setTheme] = useState('light'); // Stores the theme name\n\n  return (\n    <ThemeContext value={theme}>\n      {/* Child components can access theme here */}\n    </ThemeContext>\n  );\n}\n```\n\nTo update the theme, call `setTheme` with a new string:\n\n```tsx\nfunction ToggleButton() {\n  const [theme, setTheme] = useState('light');\n\n  const toggle = () => {\n    setTheme(theme === 'light' ? 'dark' : 'light');\n  };\n\n  return <button onClick={toggle}>Toggle Theme</button>;\n}\n```\n\n**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 21.00:1 for #000000 on #ffffff (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): passes\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): passes\n- AAA large text (at least 4.5:1): passes\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```\n\n*Note: this answer may be incomplete: The draft answer contains a code example that contradicts the provided documentation. The documentation (Excerpt [1], [2], [3], [4]) consistently shows `useState` being declared inside the parent component (`App`) and used to update the context value. The draft's second code block incorrectly declares `useState` inside a child component (`ToggleButton`), which would not allow it to update the global theme state managed by the parent as described in the docs. Additionally, while the contrast ratio is supported by the tool results, the explanation of how to use `useState` to store the theme name relies on an incorrect implementation pattern found in the draft itself rather than strictly following the documented patterns where state lives in the provider.*",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "react/learn/typescript.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md"
+        ],
+        [
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md"
+        ],
+        [
+          "react/reference/react/useState.md",
+          "react/reference/react/useState.md"
+        ],
+        [
+          "react/reference/react/createContext.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md",
+          "react/reference/react/useContext.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly states the contrast ratio and that it passes all WCAG guidelines. However, it incorrectly demonstrates the usage of `useState` by declaring it inside a child component, which contradicts the reference answer that states `useState` should be declared in the parent component."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 0.5,
+        "rationale": "The main claim about the contrast ratio is supported by the material. However, the explanation of how to use `useState` to store the theme name is not fully supported by the material, as it incorrectly shows `useState` being declared inside a child component, which contradicts the documented pattern where state lives in the provider."
+      },
+      "latency_ms": 35489.562900038436,
+      "error": null
+    }
+  ],
+  "scores": {
+    "complete_evidence_rate_at_k": {
+      "mean": 1.0,
+      "count": 3
+    },
+    "routing_accuracy": {
+      "mean": 0.9444444444444444,
+      "count": 18
+    },
+    "hit_rate_at_k": {
+      "mean": 0.8125,
+      "count": 16
+    },
+    "answer_correctness": {
+      "mean": 0.6666666666666666,
+      "count": 24
+    },
+    "faithfulness": {
+      "mean": 0.7291666666666666,
+      "count": 24
+    }
+  },
+  "error_count": 0
+}
