@@ -1,5 +1,6 @@
-# Lint, format check, the offline test suite and the image build on every push and pull
-# request.
+# Lint, format check, the offline test suite and the image build on every pull request and
+# every push to main. Pushes to other branches do not trigger it, so the commits of a pull
+# request are tested once, not twice.
 #
 # Everything runs in fake mode (scripted LLM, hashed embeddings), so CI needs no model, no
 # GPU and no corpus. The live Ollama test (marker `ollama`) is deselected by default.
@@ -7,6 +8,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
