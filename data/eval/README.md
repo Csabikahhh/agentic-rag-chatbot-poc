@@ -5,6 +5,7 @@ This directory holds the question set of the functional evaluation and the commi
 | Path | Content | Written in |
 |---|---|---|
 | `questions.jsonl` | 17 evaluation questions with reference answers, expected documents and expected intents | Phase 7 |
+| `holdout.jsonl` | 24 separate acceptance questions, including fixed conversational history and evidence groups | RAG reliability update |
 | `results/` | JSON reports of `agentic-rag eval` and `agentic-rag loadtest`, each with its Markdown summary | Phases 7 and 8 |
 
 The question set has 17 questions over the downloaded frontend documentation (plan decision 8): 8 single searches across the six sources, 3 multi-part questions (two framework comparisons and one question that needs the contrast tool twice), 4 tool questions (contrast, specificity, browser support twice), 1 greeting and 1 question outside the topic. 5 of them are in Hungarian, because the corpus is English. [docs/evaluation.md](../../docs/evaluation.md) discusses the results.
@@ -17,6 +18,8 @@ UTF-8 [JSON Lines](https://jsonlines.org/): one JSON object per line, one line p
 |---|---|---|---|
 | `id` | string | yes | Unique id such as `q01`: letters, digits, `.`, `_` and `-`, starting with a letter or a digit |
 | `question` | string | yes | The question as a user would ask it |
+| `history` | list of `{role, content}` objects | no, default `[]` | Fixed preceding user/assistant messages. Full-graph and router evaluations receive these turns; isolated retrieval rejects conversational cases because it cannot resolve their history |
+| `expected_document_groups` | list of nonempty lists of strings | no, default `[]` | Each group is a required part of the evidence; documents within a group are alternatives. Complete evidence@k requires a hit from every group across the top k results of the retrieval sub-tasks |
 | `reference_answer` | string | yes | An answer a domain expert accepts as correct; answer correctness is judged against it |
 | `expected_documents` | list of strings | no, default `[]` | The documents that contain the answer, each written exactly as ingestion identifies it (`DocumentMetadata.source` in `agentic_rag.ingestion.loaders`, which `Source.source` repeats): its path relative to `DATA_DIR` (`data/raw` by default) with forward slashes, such as `guide/intro.md`, or its URL. Empty when the question needs no retrieval. Retrieval hit@k is computed against them |
 | `expected_intent` | `"direct"`, `"single"`, `"complex"`, `"tool"` or `null` | no, default `null` | The route `analyze_request` should choose; `null` leaves routing unchecked for the question. Routing accuracy is computed against it |
@@ -26,7 +29,7 @@ UTF-8 [JSON Lines](https://jsonlines.org/): one JSON object per line, one line p
 An illustrative line, with domain-neutral placeholders and every field filled in:
 
 ```jsonl
-{"id": "q01", "question": "<a question a user of the chosen domain would ask>", "reference_answer": "<the answer an expert accepts, in one or two sentences>", "expected_documents": ["<path, relative to data/raw, of the document that answers it>"], "expected_intent": "single", "tags": ["single-hop"], "notes": "<why the question is in the set>"}
+{"id": "q01", "question": "<a question a user of the chosen domain would ask>", "reference_answer": "<the answer an expert accepts, in one or two sentences>", "expected_documents": ["<path, relative to data/raw, of the document that answers it>"], "expected_intent": "single", "tags": ["single-hop"], "notes": "<why the question is in the set>", "history": [], "expected_document_groups": []}
 ```
 
 The loader skips blank lines, strips leading and trailing whitespace from strings and accepts a UTF-8 byte order mark. It stops at the first invalid line and names the file and the line number (`data/eval/questions.jsonl:4: ...`) for any of these problems:

@@ -1,0 +1,40 @@
+# PwC-inspired light theme. System fonts keep the interface available offline.
+# Adapted from Streamlit's Jupyter theme with a warm, editorial palette.
+[theme]
+base = "light"
+primaryColor = "#C44A11"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F2EF"
+textColor = "#2D2D2D"
+linkColor = "#AD3517"
+linkUnderline = true
+borderColor = "#DDD5CE"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "4px"
+buttonRadius = "4px"
+font = "Arial, Helvetica, sans-serif"
+headingFont = "Georgia, 'Times New Roman', serif"
+headingFontSizes = ["2.75rem", "1.75rem", "1.25rem", "1.125rem", "1rem", "1rem"]
+headingFontWeights = [400, 400, 400, 600, 600, 600]
+baseFontSize = 16
+codeFontSize = "0.875rem"
+codeTextColor = "#63351E"
+codeBackgroundColor = "#F5F2EF"
+orangeColor = "#D04A02"
+orangeTextColor = "#AD3517"
+orangeBackgroundColor = "#FBEDE3"
+redColor = "#B92728"
+yellowColor = "#E8A630"
+dataframeBorderColor = "#DDD5CE"
+dataframeHeaderBackgroundColor = "#F5F2EF"
+chartCategoricalColors = ["#D04A02", "#DB536A", "#E8A630", "#A32020", "#7D5B46"]
+
+[theme.sidebar]
+backgroundColor = "#F5F2EF"
+secondaryBackgroundColor = "#ECE5DE"
+textColor = "#2D2D2D"
+borderColor = "#DDD5CE"
+headingFont = "Arial, Helvetica, sans-serif"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+codeBackgroundColor = "#ECE5DE"

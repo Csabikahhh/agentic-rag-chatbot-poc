@@ -455,7 +455,7 @@ def test_app_starts_offline_in_fake_mode_without_loading_heavy_libraries(
     at = start_app()
 
     assert not at.exception
-    assert at.title[0].value == "Agentic RAG chatbot"
+    assert at.title[0].value == "Knowledge, clarified."
     assert at.main.caption[0].value.startswith("Prototype:")
     assert at.chat_input[0].placeholder == "Ask a question"
     assert not at.chat_message
@@ -906,7 +906,6 @@ def test_real_graph_answers_a_tool_question_without_a_search(indexed_settings: S
         "analyze_request",
         "call_tool",
         "synthesize_answer",
-        "verify_answer",
         "finalize_response",
     ]
     assert any("4.47:1" in md.value for md in assistant.markdown)

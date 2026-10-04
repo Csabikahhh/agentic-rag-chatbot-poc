@@ -691,7 +691,12 @@ def test_a_downloaded_page_gets_its_source_name_and_url(tmp_path: Path) -> None:
     assert [(d.page_content, d.metadata) for d in documents] == [
         (
             "Intro.",
-            {"source": "react/reference/useState.md", "title": "useState – React", "url": url},
+            {
+                "source": "react/reference/useState.md",
+                "title": "useState – React",
+                "url": url,
+                "revision": COMMIT,
+            },
         ),
         (
             "Text.",
@@ -700,6 +705,7 @@ def test_a_downloaded_page_gets_its_source_name_and_url(tmp_path: Path) -> None:
                 "title": "useState – React",
                 "section": "Usage > Basic",
                 "url": url,
+                "revision": COMMIT,
             },
         ),
     ]
@@ -921,6 +927,7 @@ def test_build_index_stores_every_chunk_and_a_query_finds_the_right_one(
         "title": ":has() CSS pseudo-class – MDN",
         "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has",
         "chunk_id": best.metadata["chunk_id"],
+        "revision": COMMIT,
         "start_index": 0,
     }
     assert best.page_content.startswith(
@@ -1229,7 +1236,7 @@ def test_chunking_config_is_immutable() -> None:
 def test_document_metadata_keys_are_source_fields() -> None:
     keys = DocumentMetadata.__required_keys__ | DocumentMetadata.__optional_keys__
 
-    assert keys == {"source", "title", "page", "section", "url"}
+    assert keys == {"source", "title", "page", "section", "url", "revision"}
     assert keys <= set(Source.model_fields)
     assert DocumentMetadata.__required_keys__ == {"source"}
 

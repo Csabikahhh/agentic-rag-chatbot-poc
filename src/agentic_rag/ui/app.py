@@ -192,12 +192,19 @@ def _ask_example(question: str) -> None:
     st.session_state[EXAMPLE_KEY] = question
 
 
-st.set_page_config(page_title="Agentic RAG chatbot", page_icon=":material/forum:")
-st.title("Agentic RAG chatbot", anchor=False)
-st.caption(
-    "Prototype: a LangGraph agent answers from a local knowledge base with a local LLM. "
-    "Each answer shows the steps the agent took and the retrieved context it is grounded in."
+st.set_page_config(
+    page_title="Knowledge assistant | PwC prototype",
+    page_icon=":material/forum:",
+    layout="centered",
+    initial_sidebar_state="auto",
 )
+st.markdown(":primary[**PwC**]　 /　 Knowledge assistant")
+st.title("Knowledge, clarified.", anchor=False)
+st.caption(
+    "Prototype: explore your knowledge base with a local AI assistant. "
+    "Follow the reasoning steps and inspect the sources behind each answer."
+)
+st.divider()
 
 try:
     settings = get_settings()
@@ -209,22 +216,37 @@ configure_logging(settings.log_level)
 history: list[ChatTurn] = st.session_state.setdefault(HISTORY_KEY, [])
 
 with st.sidebar:
+    st.markdown(":primary[**PwC**]　 /　 Workspace")
+    st.caption("Knowledge assistant · Proof of concept")
+    st.button(
+        "Clear conversation",
+        icon=":material/add_comment:",
+        on_click=_clear_history,
+        type="primary",
+        width="stretch",
+        help="Clear this chat and start a new conversation.",
+    )
+    st.divider()
     render_settings(settings)
-    st.button("Clear conversation", icon=":material/delete:", on_click=_clear_history)
 
 question = st.chat_input("Ask a question", key="question", submit_mode="disable")
 question = question or st.session_state.pop(EXAMPLE_KEY, None)
 
 if not history and not question:
-    st.caption(":material/chat: No messages yet. Ask a question below, or try an example:")
-    for example in EXAMPLE_QUESTIONS:
-        st.button(
-            example,
-            icon=":material/lightbulb:",
-            type="tertiary",
-            on_click=_ask_example,
-            args=(example,),
-        )
+    st.subheader("Where would you like to start?", anchor=False)
+    st.caption("Ask your own question below, or explore one of these examples.")
+    with st.container(gap="small"):
+        for example in EXAMPLE_QUESTIONS:
+            st.button(
+                example,
+                icon=":material/arrow_forward:",
+                icon_position="right",
+                width="stretch",
+                wrap=True,
+                on_click=_ask_example,
+                args=(example,),
+            )
+    st.caption("Explore CSS, React and Nuxt documentation, accessibility, and browser support.")
 
 for turn in history:
     render_turn(turn)

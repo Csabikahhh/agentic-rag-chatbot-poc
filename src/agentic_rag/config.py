@@ -162,7 +162,17 @@ class Settings(BaseSettings):
     top_k: int = Field(
         default=4,
         ge=1,
-        description="Number of chunks retrieved per query.",
+        description="Maximum relevant chunks kept in the context per query.",
+    )
+    retrieval_candidates: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Candidate pool before relevance grading; at least TOP_K at runtime.",
+    )
+    hybrid_search: bool = Field(
+        default=True,
+        description="Fuse vector retrieval with local SQLite BM25 keyword search.",
     )
     grade_with_llm: bool = Field(
         default=True,

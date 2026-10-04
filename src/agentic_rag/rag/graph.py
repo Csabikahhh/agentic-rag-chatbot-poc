@@ -25,11 +25,13 @@ How ``build_rag_graph(settings)`` binds the nodes' keyword-only dependencies:
 - ``grade_documents``: the same chat model when ``settings.grade_with_llm`` is on, None
   otherwise and with the ``fake`` provider, which skips the LLM grade. ``min_score`` is
   :data:`MIN_SCORES` of the embedding provider.
-- ``retrieve``: ``top_k=settings.top_k``, and ``vector_store``, a provider that the builder
+- ``retrieve``: ``top_k=max(settings.top_k, settings.retrieval_candidates)``, an optional
+  lazy BM25 keyword search, and ``vector_store``, a provider that the builder
   creates for this graph. On its first call the provider runs ``load_index(settings)``
   under a ``threading.Lock``; later calls return the same store. Parallel ``Send`` workers of
   the main graph therefore share one index and one embedding model. A bare
   ``functools.cache`` is not enough: it lets concurrent first calls each run ``load_index``.
+- ``grade_documents`` also receives ``top_k=settings.top_k`` to cap the final context.
 
 The nodes read their configuration only from these bindings, never from ``get_settings()``,
 so the settings passed to the builder decide everything. Building stays cheap: no model is
@@ -51,6 +53,7 @@ from agentic_rag.config import EmbeddingProvider, Settings
 from agentic_rag.ingestion.index import load_index
 from agentic_rag.llm import get_chat_model
 from agentic_rag.rag import nodes
+from agentic_rag.rag.lexical import KeywordSearch
 from agentic_rag.rag.state import RagInput, RagOutput, RagState
 
 __all__ = ["MIN_SCORES", "RAG_NODE_NAMES", "build_rag_graph"]
@@ -97,13 +100,17 @@ def build_rag_graph(settings: Settings) -> CompiledStateGraph[RagState, None, Ra
     """
     chat_model = get_chat_model(settings) if settings.llm_provider != "fake" else None
     grading_model = chat_model if settings.grade_with_llm else None
+    index = _index_provider(settings)
 
     builder = StateGraph(RagState, input_schema=RagInput, output_schema=RagOutput)
     builder.add_node("rewrite_query", functools.partial(nodes.rewrite_query, chat_model=chat_model))
     builder.add_node(
         "retrieve",
         functools.partial(
-            nodes.retrieve, vector_store=_index_provider(settings), top_k=settings.top_k
+            nodes.retrieve,
+            vector_store=index,
+            top_k=max(settings.top_k, settings.retrieval_candidates),
+            keyword_search=KeywordSearch(index) if settings.hybrid_search else None,
         ),
     )
     builder.add_node(
@@ -112,6 +119,7 @@ def build_rag_graph(settings: Settings) -> CompiledStateGraph[RagState, None, Ra
             nodes.grade_documents,
             min_score=MIN_SCORES[settings.embedding_provider],
             chat_model=grading_model,
+            top_k=settings.top_k,
         ),
     )
     builder.add_node("build_context", nodes.build_context)

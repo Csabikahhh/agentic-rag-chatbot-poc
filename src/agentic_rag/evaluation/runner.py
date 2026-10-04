@@ -40,11 +40,12 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 from agentic_rag.agent.types import Intent
 from agentic_rag.config import Settings
 from agentic_rag.errors import ConfigurationError, IndexNotFoundError, InvalidArgumentError
-from agentic_rag.evaluation.dataset import DEFAULT_DATASET_PATH, EvalItem, load_dataset
+from agentic_rag.evaluation.dataset import DEFAULT_DATASET_PATH, EvalItem, EvalMessage, load_dataset
 from agentic_rag.evaluation.metrics import (
     JudgeError,
     JudgeScore,
     answer_correctness,
+    complete_evidence_at_k,
     faithfulness,
     hit_at_k,
     intent_matches,
@@ -141,6 +142,7 @@ class EvalItemResult(BaseModel):
     answer_correctness: JudgeScore | None = Field(
         default=None, description="Judged agreement with the reference answer."
     )
+    complete_evidence_at_k: bool | None = Field(default=None)
     faithfulness: JudgeScore | None = Field(
         default=None, description="Judged support of the answer by its contexts."
     )
@@ -167,6 +169,14 @@ class EvalItemResult(BaseModel):
                 f"expected_intent={expected_intent!r}, predicted_intent={self.predicted_intent!r}"
             )
             raise ValueError(msg)
+        if self.complete_evidence_at_k is not None:
+            if not self.item.expected_document_groups:
+                raise ValueError("complete_evidence_at_k requires expected_document_groups")
+            found = set(itertools.chain(*self.retrieved_documents))
+            if self.complete_evidence_at_k and any(
+                found.isdisjoint(group) for group in self.item.expected_document_groups
+            ):
+                raise ValueError("complete_evidence_at_k is True but an evidence group is missing")
         if self.hit_at_k is None:
             return self
         expected = set(self.item.expected_documents)
@@ -206,6 +216,9 @@ class EvalScores(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, allow_inf_nan=False)
+    complete_evidence_rate_at_k: MetricSummary = Field(
+        default_factory=lambda: MetricSummary(mean=None, count=0)
+    )
 
     routing_accuracy: MetricSummary = Field(
         description="Share of the items with an expected intent that were routed to it."
@@ -270,6 +283,9 @@ class EvalReport(RunReport):
         return EvalScores(
             routing_accuracy=_summarize(result.intent_correct for result in self.items),
             hit_rate_at_k=_summarize(result.hit_at_k for result in self.items),
+            complete_evidence_rate_at_k=_summarize(
+                result.complete_evidence_at_k for result in self.items
+            ),
             answer_correctness=_summarize(
                 _score_of(result.answer_correctness) for result in self.items
             ),
@@ -431,6 +447,7 @@ def render_summary(report: EvalReport) -> str:
     for label, summary in (
         ("Routing accuracy", scores.routing_accuracy),
         (f"Retrieval hit@{k}", scores.hit_rate_at_k),
+        (f"Complete evidence@{k}", scores.complete_evidence_rate_at_k),
         ("Answer correctness", scores.answer_correctness),
         ("Faithfulness", scores.faithfulness),
     ):
@@ -470,6 +487,16 @@ def render_summary(report: EvalReport) -> str:
     if rationales:
         lines += ["", "## Judge rationales", "", *rationales]
     errors = [f"- **{r.item.id}**: {r.error}" for r in report.items if r.error is not None]
+    evidence = [r for r in report.items if r.complete_evidence_at_k is not None]
+    if evidence:
+        lines += [
+            "",
+            "## Complete evidence",
+            "",
+            f"Every required evidence group must have a hit in a sub-task's top {k}.",
+            "",
+        ]
+        lines += [f"- **{r.item.id}**: {_mark(r.complete_evidence_at_k)}" for r in evidence]
     if errors:
         lines += ["", "## Errors", "", *errors]
     return "\n".join(lines) + "\n"
@@ -486,7 +513,7 @@ class _Outcome:
     grounded: bool = False  # The run searched or called a tool, whatever that produced.
 
 
-type _Runner = Callable[[str], _Outcome]
+type _Runner = Callable[..., _Outcome]
 """Runs one question and returns its outcome."""
 
 
@@ -498,8 +525,8 @@ def _graph_runner(settings: Settings) -> _Runner:
 
     graph = build_agent_graph(settings)
 
-    def run(question: str) -> _Outcome:
-        output = graph.invoke({"messages": [HumanMessage(question)]})
+    def run(question: str, *, history: Sequence[EvalMessage] = ()) -> _Outcome:
+        output = graph.invoke({"messages": [*_history_messages(history), HumanMessage(question)]})
         results = output.get("subtask_results", [])
         return _Outcome(
             answer=output.get("answer"),
@@ -526,14 +553,18 @@ def _node_runner(settings: Settings, node: str) -> _Runner:
         chat_model = get_chat_model(settings)
         tools = {tool.name: tool for tool in other_tools}
 
-        def analyze(question: str) -> _Outcome:
-            state = {"messages": [HumanMessage(question)]}
+        def analyze(question: str, *, history: Sequence[EvalMessage] = ()) -> _Outcome:
+            state = {"messages": [*_history_messages(history), HumanMessage(question)]}
             update = nodes.analyze_request(state, chat_model=chat_model, tools=tools)  # type: ignore[arg-type]
             return _Outcome(answer=update.get("draft_answer"), intent=update.get("intent"))
 
         return analyze
 
-    def retrieve(question: str) -> _Outcome:
+    def retrieve(question: str, *, history: Sequence[EvalMessage] = ()) -> _Outcome:
+        if history:
+            raise InvalidArgumentError(
+                "Follow-up retrieval must be evaluated through the full graph"
+            )
         subtask = Subtask(id="s1", kind="retrieve", input=question)
         update = nodes.run_rag_subtask(
             {"subtask": subtask, "question": question},
@@ -543,6 +574,13 @@ def _node_runner(settings: Settings, node: str) -> _Runner:
         return _Outcome(answer=result.output or None, retrieved=[_documents(result)])
 
     return retrieve
+
+
+def _history_messages(history: Sequence[EvalMessage]) -> list[Any]:
+    """Convert fixed evaluation history into the same message types as the chat UI."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    return [(HumanMessage if turn.role == "user" else AIMessage)(turn.content) for turn in history]
 
 
 def _judge_model(settings: Settings, model: str) -> "BaseChatModel":
@@ -570,7 +608,7 @@ def _evaluate(
     started = time.perf_counter()
     error: str | None = None
     try:
-        outcome = run(item.question)
+        outcome = run(item.question, history=item.history) if item.history else run(item.question)
     except (IndexNotFoundError, ConfigurationError):
         raise  # Not specific to this question: every other one would fail the same way.
     except Exception as exc:
@@ -586,7 +624,10 @@ def _evaluate(
             item,
             "answer correctness",
             lambda: answer_correctness(
-                item.question, outcome.answer or "", item.reference_answer, judge=judge
+                "\n".join([*(f"{m.role}: {m.content}" for m in item.history), item.question]),
+                outcome.answer or "",
+                item.reference_answer,
+                judge=judge,
             ),
         )
         if outcome.grounded:
@@ -602,6 +643,11 @@ def _evaluate(
         retrieved_documents=outcome.retrieved,
         intent_correct=intent_matches(item.expected_intent, outcome.intent) if routes else None,
         hit_at_k=hit_at_k(outcome.retrieved, item.expected_documents, k) if retrieves else None,
+        complete_evidence_at_k=(
+            complete_evidence_at_k(outcome.retrieved, item.expected_document_groups, k)
+            if retrieves
+            else None
+        ),
         answer_correctness=correctness,
         faithfulness=support,
         latency_ms=latency_ms,

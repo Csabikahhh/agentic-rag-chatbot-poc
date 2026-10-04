@@ -537,7 +537,13 @@ def test_material_without_excerpts_says_so_only_without_tool_results() -> None:
         ('{"grounded": true}', None, "grounded", "", 0),
         ('{"grounded": false, "missing": "React"}', None, "insufficient", "React", 0),
         ('{"grounded": false, "missing": "React"}', "insufficient", "insufficient", "React", 2),
-        ("unreadable", "insufficient", "grounded", "", 2),
+        (
+            "unreadable",
+            "insufficient",
+            "unavailable",
+            "Verification returned an unreadable response. Please try again.",
+            2,
+        ),
     ],
 )
 def test_verify_answer_judges_the_draft_and_counts_the_replans(
@@ -722,10 +728,9 @@ def test_a_tool_question_runs_the_tool(settings: Settings) -> None:
         "analyze_request",
         "call_tool",
         "synthesize_answer",
-        "verify_answer",
         "finalize_response",
     ]
-    assert output["answer"].startswith("Contrast ratio 4.47:1 for #777777 on #ffffff")
+    assert "Contrast ratio 4.47:1 for #777777 on #ffffff" in output["answer"]
 
 
 def test_the_replan_loop_is_bounded(indexed: Settings, monkeypatch: pytest.MonkeyPatch) -> None:

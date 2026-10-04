@@ -39,6 +39,7 @@ import re
 import sys
 from collections.abc import Mapping, MutableSequence, Sequence
 from typing import Any, Final, Literal
+from urllib.parse import quote, urlsplit
 
 import streamlit as st
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -403,7 +404,7 @@ def render_reply(turn: ChatTurn) -> None:
             icon=":material/stop_circle:",
         )
     elif turn.content:
-        st.markdown(escape_dollar_signs(turn.content))
+        st.markdown(link_citations(escape_dollar_signs(turn.content), turn.sources))
     else:
         st.warning("The agent finished without an answer.", icon=":material/help:")
 
@@ -481,7 +482,10 @@ def render_settings(settings: Settings) -> None:
         settings: The effective settings, as returned by ``get_settings()``.
     """
     st.subheader("Configuration", anchor=False)
-    st.table(settings_summary(settings), border="horizontal", width="content")
+    st.table(settings_summary(settings), border="horizontal", width="stretch")
+    method = "Hybrid (vector + keyword)" if settings.hybrid_search else "Vector only"
+    candidates = max(settings.top_k, settings.retrieval_candidates)
+    st.caption(f"{method} · {candidates} candidates → up to {settings.top_k} context chunks")
     st.caption(
         "Read-only. Change it with environment variables or a .env file (see .env.example), "
         "then restart the app."
@@ -954,8 +958,10 @@ def _source_details(source: Source) -> str:
         details.append(f"Section: {escape_markdown(source.section)}")
     if source.page is not None:
         details.append(f"Page: {source.page}")
-    if source.url:
+    if source.url and _is_web_url(source.url):
         details.append(f"[Open the page]({_link_target(source.url)})")
+    if source.revision:
+        details.append(f"Indexed snapshot: {_inline_code(source.revision[:12])}")
     if source.score is not None:
         details.append(f"Score: {source.score:.3f}")
     details.append(f"Chunk: {_inline_code(source.chunk_id)}")
@@ -964,4 +970,27 @@ def _source_details(source: Source) -> str:
 
 def _link_target(url: str) -> str:
     """Encode the characters that would end a Markdown link target early."""
-    return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+    return quote(url, safe="/:#?=&%+@;,$!~*'-._")
+
+
+def _is_web_url(url: str) -> bool:
+    """Only make absolute HTTP(S) source URLs clickable."""
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    except ValueError:
+        return False
+
+
+def link_citations(markdown: str, sources: Sequence[Source]) -> str:
+    """Resolve numbered citations using Markdown references, leaving code blocks untouched.
+
+    Markdown's own parser distinguishes prose references from code and existing links.
+    Sources without a public web URL retain their plain citation and context expander.
+    """
+    references = [
+        f"[{number}]: <{_link_target(source.url)}>"
+        for number, source in enumerate(sources, start=1)
+        if source.url and _is_web_url(source.url)
+    ]
+    return markdown + "\n\n" + "\n".join(references) if references else markdown

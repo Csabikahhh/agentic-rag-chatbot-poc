@@ -38,8 +38,8 @@ EXPECTED_RAG_NODE_NAMES = ("rewrite_query", "retrieve", "grade_documents", "buil
 # vector index, the retrieval depth and the score threshold.
 RAG_NODE_DEPENDENCIES: dict[str, set[str]] = {
     "rewrite_query": {"chat_model"},
-    "retrieve": {"vector_store", "top_k"},
-    "grade_documents": {"min_score", "chat_model"},
+    "retrieve": {"vector_store", "top_k", "keyword_search"},
+    "grade_documents": {"min_score", "chat_model", "top_k"},
     "build_context": set(),
 }
 RAG_DEPENDENCY_TYPES: dict[str, Any] = {
@@ -47,6 +47,7 @@ RAG_DEPENDENCY_TYPES: dict[str, Any] = {
     "vector_store": Callable[[], VectorStore],
     "top_k": int,
     "min_score": float,
+    "keyword_search": Callable[[str, int], list[Document]] | None,
 }
 
 
@@ -64,6 +65,15 @@ class StandInStore:
     def __init__(self, results: list[tuple[Document, float]]) -> None:
         self.results = results
         self.calls: list[tuple[str, int]] = []
+
+    def get(self, *, limit: int, offset: int, include: list[str]) -> dict[str, Any]:
+        """Expose the stored chunks to the lazy keyword index."""
+        documents = [doc for doc, _ in self.results][offset : offset + limit]
+        return {
+            "ids": [doc.metadata["chunk_id"] for doc in documents],
+            "documents": [doc.page_content for doc in documents],
+            "metadatas": [doc.metadata for doc in documents],
+        }
 
     def similarity_search_with_relevance_scores(
         self, query: str, k: int
@@ -117,8 +127,16 @@ def test_rag_nodes_take_their_state_and_explicit_dependencies(name: str) -> None
     assert {param.name for param in dependency_params} == RAG_NODE_DEPENDENCIES[name]
     for param in dependency_params:
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
-        assert param.default is inspect.Parameter.empty, "dependencies are bound, not defaulted"
-        assert hints[param.name] == RAG_DEPENDENCY_TYPES[param.name]
+        if param.name == "keyword_search" or (name == "grade_documents" and param.name == "top_k"):
+            assert param.default is None
+        else:
+            assert param.default is inspect.Parameter.empty
+        expected_type = (
+            int | None
+            if name == "grade_documents" and param.name == "top_k"
+            else RAG_DEPENDENCY_TYPES[param.name]
+        )
+        assert hints[param.name] == expected_type
 
 
 def test_build_rag_graph_requires_settings_and_returns_the_typed_subgraph() -> None:
