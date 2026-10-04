@@ -36,8 +36,8 @@ partial update), and in addition:
   node's ``RetryPolicy``; a failing tool becomes a ``SubtaskResult`` with ``ok=False``, so the
   answer can still be written from the other results; a structured reply that cannot be read
   falls back to a safe default and logs a warning (``analyze_request`` and ``plan_subtasks``
-  search for the question, ``verify_answer`` accepts the draft); unexpected errors, such as
-  a missing index, propagate.
+  search for the question, ``verify_answer`` marks verification unavailable); unexpected
+  errors, such as a missing index, propagate.
 
 Citations: the ``[n]`` markers of a RAG context, and so of a ``SubtaskResult.output``, are
 local to one RAG run. They number that result's own ``sources``, so every ``retrieve``
@@ -73,6 +73,7 @@ from agentic_rag.agent.prompts import (
     synthesize_messages,
     verify_messages,
 )
+from agentic_rag.agent.routing import is_exact_tool_answer
 from agentic_rag.agent.state import AgentState, Subtask, SubtaskInput, SubtaskResult
 from agentic_rag.agent.tools import SearchKnowledgeBaseTool
 from agentic_rag.rag.state import Source
@@ -410,7 +411,8 @@ def call_tool(state: SubtaskInput, *, tools: Mapping[str, BaseTool]) -> dict[str
 def synthesize_answer(state: AgentState, *, chat_model: BaseChatModel) -> dict[str, Any]:
     """Write a draft answer from the results of the current planning round.
 
-    Kind: LLM. It runs once per round, after every ``Send`` worker of the round has finished
+    Kind: LLM, except exact single-tool replies which make no model call. It runs once per
+    round, after every ``Send`` worker of the round has finished
     (fan-in through the ``subtask_results`` reducer).
 
     Reads ``question`` and ``subtask_results`` (sources, tool outputs and failures of the
@@ -431,6 +433,8 @@ def synthesize_answer(state: AgentState, *, chat_model: BaseChatModel) -> dict[s
     Returns:
         The partial state update described above.
     """
+    if is_exact_tool_answer(state):
+        return {"draft_answer": ""}
     results = state.get("subtask_results", [])
     material = format_material(numbered_sources(results), results)
     latest = _split_conversation(state["messages"])[1]
@@ -462,7 +466,7 @@ def verify_answer(state: AgentState, *, chat_model: BaseChatModel) -> dict[str, 
 
     - ``verdict``: ``"grounded"`` when the draft answers the question and every claim in it is
       supported by the results; ``"insufficient"`` otherwise. A reply that cannot be read
-      accepts the draft (``"grounded"``), so an unreadable verification never loops.
+      returns ``"unavailable"`` and the final response withholds the unverified draft.
     - ``critique``: what is missing or unsupported, for the re-plan; empty when grounded.
     - ``retry_count``: the number of re-plans performed so far. It is 0 when the first draft is
       verified and grows by one for each draft that comes from a re-plan (that is, when the
@@ -479,9 +483,15 @@ def verify_answer(state: AgentState, *, chat_model: BaseChatModel) -> dict[str, 
     results = state.get("subtask_results", [])
     material = format_material(numbered_sources(results), results)
     prompt = verify_messages(_question(state), material, state.get("draft_answer", ""))
-    verification = _structured(chat_model, Verification, prompt) or Verification(grounded=True)
+    verification = _structured(chat_model, Verification, prompt)
     previous = state.get("verdict")
     retry_count = state.get("retry_count", 0) + 1 if previous == "insufficient" else 0
+    if verification is None:
+        return {
+            "verdict": "unavailable",
+            "critique": "Verification returned an unreadable response. Please try again.",
+            "retry_count": retry_count,
+        }
     return {
         "verdict": "grounded" if verification.grounded else "insufficient",
         "critique": "" if verification.grounded else verification.missing.strip(),
@@ -509,6 +519,7 @@ def finalize_response(state: AgentState) -> dict[str, Any]:
       wrongly.
       When the last verdict is still ``"insufficient"`` (the retries are exhausted), the
       answer ends with an explicit note (:data:`PARTIAL_NOTE`) that names what is missing.
+      An ``unavailable`` verifier withholds the draft and asks the user to retry.
     - ``sources``: exactly the globally numbered list that ``synthesize_answer`` cited from
       (see Citations in the module docstring), so ``[n]`` in the answer is ``sources[n - 1]``;
       ``[]`` on the ``direct`` route. All retrieved chunks stay in the list, cited or not, so
@@ -530,6 +541,10 @@ def finalize_response(state: AgentState) -> dict[str, Any]:
         lambda match: match[0] if 1 <= int(match[1]) <= len(sources) else "",
         state.get("draft_answer", "") or NO_DRAFT,
     ).strip()
+    if is_exact_tool_answer(state):
+        answer = ""
+    elif state.get("verdict") == "unavailable":
+        answer = "I couldn't verify the answer, so I have withheld the draft. Please try again."
     names = {subtask.id: subtask.tool_name for subtask in state.get("subtasks", [])}
     shown: set[tuple[str, str]] = set()
     for result in results:
@@ -543,6 +558,7 @@ def finalize_response(state: AgentState) -> dict[str, Any]:
         critique = state.get("critique", "")
         note = f"{PARTIAL_NOTE}: {critique}" if critique else f"{PARTIAL_NOTE}."
         answer = f"{answer}\n\n*{note}*"
+    answer = answer.strip()
     return {"answer": answer, "sources": sources, "messages": [AIMessage(content=answer)]}
 
 

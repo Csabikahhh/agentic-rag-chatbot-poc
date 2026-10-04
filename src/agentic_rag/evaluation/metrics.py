@@ -211,6 +211,22 @@ def hit_rate_at_k(
     )
 
 
+def complete_evidence_at_k(
+    retrieved: Sequence[Sequence[str]], groups: Sequence[Collection[str]], k: int
+) -> bool | None:
+    """Require a top-k hit for every evidence group, allowing alternatives within a group."""
+    _check_k(k)
+    _check_rankings(retrieved)
+    _check_not_text(groups, "groups")
+    if not groups:
+        return None
+    for group in groups:
+        _check_not_text(group, "group")
+        if not group:
+            raise ValueError("evidence groups must not be empty")
+    return all(hit_at_k(retrieved, group, k) for group in groups)
+
+
 def intent_matches(expected: Intent | None, predicted: Intent | None) -> bool | None:
     """Tell whether the route chosen by ``analyze_request`` is the expected one.
 

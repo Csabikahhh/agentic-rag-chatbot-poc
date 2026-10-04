@@ -129,3 +129,25 @@ def route_after_verify(
     if state.get("verdict") == "insufficient" and state.get("retry_count", 0) < max_retries:
         return "plan_subtasks"
     return "finalize_response"
+
+
+def is_exact_tool_answer(state: AgentState) -> bool:
+    """Allow the fast path only for a single successful built-in deterministic tool."""
+    results = state.get("subtask_results", [])
+    tasks = state.get("subtasks", [])
+    return (
+        state.get("intent") == "tool"
+        and len(tasks) == len(results) == 1
+        and tasks[0].kind == results[0].kind == "tool"
+        and tasks[0].id == results[0].subtask_id
+        and results[0].tool_name == tasks[0].tool_name
+        and results[0].tool_name in {"check_contrast", "css_specificity", "browser_support"}
+        and results[0].ok
+        and bool(results[0].output.strip())
+        and not results[0].sources
+    )
+
+
+def route_after_synthesize(state: AgentState) -> Literal["finalize_response", "verify_answer"]:
+    """Skip model verification only when the answer contains an exact deterministic result."""
+    return "finalize_response" if is_exact_tool_answer(state) else "verify_answer"

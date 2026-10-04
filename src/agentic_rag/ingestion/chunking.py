@@ -347,4 +347,6 @@ def _chunk_id(metadata: Mapping[str, object], start: int, content: str) -> str:
         str(start),
         content,
     ]
+    if metadata.get("revision"):
+        fields.append(str(metadata["revision"]))
     return hashlib.sha256("\x1f".join(fields).encode("utf-8")).hexdigest()[:32]

@@ -83,6 +83,7 @@ class DocumentMetadata(TypedDict, total=False):
     page: int
     section: str
     url: str
+    revision: str
 
 
 def list_corpus_files(data_dir: Path) -> list[Path]:
@@ -199,6 +200,8 @@ def _load_file(
     documents = []
     for section in sections:
         metadata: DocumentMetadata = {"source": source, "title": title}
+        if manifest is not None:
+            metadata["revision"] = manifest.commit
         if section.path:
             metadata["section"] = SECTION_SEPARATOR.join(section.path)
         if url is not None:

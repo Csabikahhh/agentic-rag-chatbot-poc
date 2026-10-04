@@ -3,8 +3,8 @@
 The four nodes run in this order and exchange data only through ``RagState``:
 
 - ``rewrite_query`` reads ``query`` and writes ``rewritten_query``.
-- ``retrieve`` reads ``rewritten_query`` (or ``query``) and writes ``documents`` and
-  ``scores``.
+- ``retrieve`` combines vector and optional lexical search and writes ``documents``,
+  cosine ``scores`` and the ids of ``keyword_matches``.
 - ``grade_documents`` reads ``documents`` and ``scores`` and writes the relevant subset of
   both.
 - ``build_context`` reads ``documents`` and ``scores`` and writes ``context`` and ``sources``.
@@ -25,8 +25,8 @@ Contract:
 
 - Nodes never mutate the state.
 - ``documents`` and ``scores`` are parallel lists (``scores[i]`` belongs to ``documents[i]``).
-  Higher scores are more relevant, and the lists stay in rank order, most relevant first,
-  from ``retrieve`` to ``build_context``.
+  The lists stay in retrieval rank order; hybrid rank uses reciprocal-rank fusion, not
+  cosine scores. A score of -1 marks a keyword-only hit whose cosine score is unknown.
 - Every node is wrapped with ``agentic_rag.tracing.traced`` and its function name equals its
   node name in ``agentic_rag.rag.graph.RAG_NODE_NAMES``. So each executed node appends one
   ``TraceEvent`` to ``trace``, with a one-line summary and a few counts as metadata, and
@@ -58,6 +58,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.vectorstores import VectorStore
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agentic_rag.rag.lexical import chunk_key, fuse_rankings
 from agentic_rag.rag.state import RagState, Source
 from agentic_rag.tracing import traced
 
@@ -146,13 +147,17 @@ def rewrite_query(state: RagState, *, chat_model: BaseChatModel | None) -> dict[
     },
 )
 def retrieve(
-    state: RagState, *, vector_store: Callable[[], VectorStore], top_k: int
+    state: RagState,
+    *,
+    vector_store: Callable[[], VectorStore],
+    top_k: int,
+    keyword_search: Callable[[str, int], list[Document]] | None = None,
 ) -> dict[str, Any]:
     """Search the vector index for the chunks closest to the query.
 
     Reads ``rewritten_query``, or ``query`` when no rewrite was written. Writes
-    ``documents``, the ``top_k`` most similar chunks with their ``ChunkMetadata``, most
-    relevant first, and ``scores``, their relevance scores in the same order.
+    ``documents``, up to ``top_k`` candidates in fused rank order, and ``scores``, their
+    cosine similarities (-1 for keyword-only hits), in the same order.
 
     Args:
         state: The subgraph state.
@@ -160,7 +165,8 @@ def retrieve(
             The node calls it on every run. The provider opens the index on its first call
             and returns the same store afterwards, so the first query pays for loading the
             embedding model, not the graph build.
-        top_k: Number of chunks to retrieve (``Settings.top_k``).
+        top_k: Candidate depth before grading (at least ``Settings.top_k``).
+        keyword_search: Optional BM25 search over the indexed chunks; None is vector-only.
 
     Returns:
         The partial update ``{"documents": [...], "scores": [...]}``.
@@ -173,9 +179,16 @@ def retrieve(
     query = state.get("rewritten_query") or state["query"]
     results = vector_store().similarity_search_with_relevance_scores(query, k=top_k)
     ranked = sorted(results, key=lambda pair: pair[1], reverse=True)
+    keyword_matches = []
+    if keyword_search is not None:
+        # Include the original query so a rewrite cannot erase exact API identifiers.
+        lexical = keyword_search(f"{state['query']} {query}", top_k)
+        keyword_matches = [chunk_key(document) for document in lexical]
+        ranked = fuse_rankings(ranked, lexical, top_k)
     return {
         "documents": [document for document, _ in ranked],
         "scores": [float(score) for _, score in ranked],
+        **({"keyword_matches": keyword_matches} if keyword_search is not None else {}),
     }
 
 
@@ -184,17 +197,21 @@ def retrieve(
     metadata=lambda update: {"chunks": len(update.get("documents", []))},
 )
 def grade_documents(
-    state: RagState, *, min_score: float, chat_model: BaseChatModel | None
+    state: RagState,
+    *,
+    min_score: float,
+    chat_model: BaseChatModel | None,
+    top_k: int | None = None,
 ) -> dict[str, Any]:
     """Drop the retrieved chunks that are not relevant to the query.
 
     Reads ``documents`` and ``scores``, and ``query`` and ``rewritten_query`` for the LLM
     grade. Writes ``documents`` and ``scores`` again with the relevant subset in rank order.
-    Chunks that score below ``min_score`` are dropped first. Then, if ``chat_model`` is set
+    Chunks below ``min_score`` without a keyword match are dropped. If ``chat_model`` is set
     and chunks remain, the model grades them in one call (:data:`GRADE_INSTRUCTIONS`,
     :class:`RelevanceGrade`) and the chunks it does not list are dropped too (plan section
     5.2). A grade that is not valid JSON keeps every chunk that passed the threshold and logs
-    a warning. Both lists may become empty.
+    a warning. The relevant subset is capped at ``top_k``. Both lists may become empty.
 
     Args:
         state: The subgraph state.
@@ -202,16 +219,23 @@ def grade_documents(
         chat_model: The chat model that grades the chunks above the threshold, or None to
             keep all of them. ``build_rag_graph`` passes None with the fake LLM provider and
             when ``GRADE_WITH_LLM`` is off.
+        top_k: Maximum retained chunks; None leaves direct node calls uncapped.
 
     Returns:
         The partial update ``{"documents": [...], "scores": [...]}``.
     """
     pairs = zip(state.get("documents", []), state.get("scores", []), strict=True)
-    kept = [(document, score) for document, score in pairs if score >= min_score]
+    keyword_matches = set(state.get("keyword_matches", []))
+    kept = [
+        (document, score)
+        for document, score in pairs
+        if score >= min_score or chunk_key(document) in keyword_matches
+    ]
     if chat_model is not None and kept:
         relevant = _llm_grade(chat_model, state, [document for document, _ in kept])
         if relevant is not None:
             kept = [pair for number, pair in enumerate(kept, start=1) if number in relevant]
+    kept = kept[:top_k]
     return {
         "documents": [document for document, _ in kept],
         "scores": [score for _, score in kept],
@@ -309,10 +333,11 @@ def _source(document: Document, score: float) -> Source:
         source=str(metadata.get("source", "")),
         content=document.page_content,
         title=metadata.get("title"),
+        revision=metadata.get("revision"),
         page=metadata.get("page"),
         section=metadata.get("section"),
         url=metadata.get("url"),
-        score=score,
+        score=score if score >= 0 else None,
     )
 
 

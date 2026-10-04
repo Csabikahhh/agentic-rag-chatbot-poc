@@ -5,7 +5,7 @@
 # context by default. This excludes, among others: .git, .github, .venv,
 # .claude/, task/, tests/, docs/, data/ except the source list (the container
 # downloads the corpus and builds the index into named volumes, see
-# compose.yaml), IDE folders, .env files, .streamlit/ and the Docker files
+# compose.yaml), IDE folders, .env files, and the Docker files
 # themselves.
 #
 # Adapted from the asset dockerignore-example of the docker-project-foundations
@@ -23,6 +23,10 @@
 !README.md
 !LICENSE
 !src/
+# Include only the public UI theme, never Streamlit secrets.
+!.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 # The source list of the corpus download, read at start-up.
 !data/sources.toml
 

@@ -20,7 +20,7 @@ import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -41,6 +41,14 @@ DEFAULT_DATASET_PATH: Final = Path("data/eval/questions.jsonl")
 _NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
+class EvalMessage(BaseModel):
+    """A fixed preceding conversation turn for evaluating follow-up questions."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
+    role: Literal["user", "assistant"]
+    content: _NonEmptyStr
+
+
 class EvalItem(BaseModel):
     """One evaluation question with its reference answer and the expected behaviour.
 
@@ -57,6 +65,12 @@ class EvalItem(BaseModel):
         "starting with a letter or a digit, so it is safe in file names, tables and logs.",
     )
     question: str = Field(min_length=1, description="The question as a user would ask it.")
+    history: list[EvalMessage] = Field(default_factory=list)
+    expected_document_groups: list[Annotated[list[_NonEmptyStr], Field(min_length=1)]] = Field(
+        default_factory=list,
+        description="Required evidence groups. At least one document from EVERY group must "
+        "be retrieved; documents within one group are acceptable alternatives.",
+    )
     reference_answer: str = Field(
         min_length=1,
         description="An answer a domain expert accepts as correct; answer correctness is "

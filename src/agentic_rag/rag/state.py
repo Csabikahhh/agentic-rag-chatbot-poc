@@ -46,6 +46,7 @@ class Source(BaseModel):
     )
     content: str = Field(description="Text of the chunk as indexed.")
     title: str | None = Field(default=None, description="Document title, when known.")
+    revision: str | None = Field(default=None, description="Indexed documentation commit SHA.")
     page: int | None = Field(
         default=None, ge=1, description="1-based page number, for paged formats such as PDF."
     )
@@ -103,8 +104,10 @@ class RagState(TypedDict, total=False):
             ``query`` when rewriting is skipped (for example in fake mode).
         documents: Retrieved chunks with their index metadata, most relevant first, written
             by ``retrieve`` and replaced by ``grade_documents`` with the relevant subset.
-        scores: Relevance scores parallel to ``documents`` (``scores[i]`` belongs to
-            ``documents[i]``); higher means more relevant.
+        scores: Cosine similarities parallel to ``documents``; -1 means unknown for a
+            keyword-only hit. Hybrid rank is independent of these scores.
+        keyword_matches: Chunk ids found by lexical retrieval, eligible for LLM grading
+            even when they fail the cosine threshold.
         context: Formatted context with citation markers, written by ``build_context``.
         sources: The cited chunks as :class:`Source` records in rank order, written by
             ``build_context``.
@@ -115,6 +118,7 @@ class RagState(TypedDict, total=False):
     rewritten_query: str
     documents: list[Document]
     scores: list[float]
+    keyword_matches: list[str]
     context: str
     sources: list[Source]
     trace: Annotated[list[TraceEvent], operator.add]

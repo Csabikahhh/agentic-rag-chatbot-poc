@@ -125,6 +125,7 @@ RUN mkdir -p /app/data/raw /app/data/chroma_db "${HF_HOME}" \
 # The source list of the corpus download, read-only for the app user.
 COPY --link data/sources.toml /app/data/sources.toml
 COPY --link src /app/src
+COPY --link .streamlit/config.toml /app/.streamlit/config.toml
 
 # The project itself, in editable mode (the venv points at /app/src): its
 # metadata, the .pth file and the agentic-rag console script. Bytecode

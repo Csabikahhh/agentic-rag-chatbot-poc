@@ -127,7 +127,7 @@ def test_subtask_json_schema_suits_structured_output() -> None:
 def test_literal_types_and_schema_keys_match_the_plan() -> None:
     """Intents, verdicts, kinds and required keys are the ones the plan defines."""
     assert get_args(Intent) == ("direct", "single", "complex", "tool")
-    assert get_args(Verdict) == ("grounded", "insufficient")
+    assert get_args(Verdict) == ("grounded", "insufficient", "unavailable")
     assert get_args(SubtaskKind) == ("retrieve", "tool")
     assert AgentState.__required_keys__ == frozenset({"messages"})
     assert RagState.__required_keys__ == frozenset({"query"})

@@ -1,0 +1,746 @@
+{
+  "created_at": "2026-10-04T19:24:48.490732Z",
+  "settings": {
+    "LLM_PROVIDER": "ollama",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "qwen3.5:4b",
+    "OLLAMA_NUM_CTX": "8192",
+    "OLLAMA_TIMEOUT_S": "120.0",
+    "OLLAMA_REASONING": "false",
+    "LLM_TEMPERATURE": "0.0",
+    "EMBEDDING_PROVIDER": "huggingface",
+    "EMBEDDING_MODEL": "intfloat/multilingual-e5-small",
+    "DATA_DIR": "data/raw",
+    "CHROMA_DIR": "data/chroma_db",
+    "CHROMA_COLLECTION": "documents",
+    "TOP_K": "4",
+    "RETRIEVAL_CANDIDATES": "20",
+    "HYBRID_SEARCH": "true",
+    "GRADE_WITH_LLM": "true",
+    "MAX_RETRIES": "2",
+    "INGEST_ON_START": "true",
+    "LOG_LEVEL": "INFO"
+  },
+  "target": "graph",
+  "node": null,
+  "dataset": "data/eval/questions.jsonl",
+  "judge_model": "hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",
+  "items": [
+    {
+      "item": {
+        "id": "q01",
+        "question": "Which CSS pseudo-class selects a parent element that contains a specific child?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The :has() pseudo-class. It matches an element if any of the relative selectors passed to it matches at least one element anchored at that element, so section:has(.featured) selects the sections that contain a .featured element.",
+        "expected_documents": [
+          "mdn/web/css/reference/selectors/_colon_has/index.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "mdn"
+        ],
+        "notes": null
+      },
+      "answer": "The CSS pseudo-class that selects a parent element containing a specific child is **`:has()`**.\n\nIt represents an element if any relative selector passed as an argument matches at least one element when anchored against it, allowing you to select a parent based on its descendants [1].\n\n**Example:**\n```css\nh1:has(p) {\n  margin-bottom: 0;\n}\n```\nThis selects an `h1` heading that contains a paragraph element as a descendant [1].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "mdn/web/css/reference/selectors/_colon_has/index.md",
+          "mdn/web/css/reference/selectors/_colon_has/index.md",
+          "mdn/web/css/reference/selectors/_colon_has/index.md",
+          "mdn/web/css/reference/selectors/_colon_has/index.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly identifies the :has() pseudo-class and provides a relevant example that aligns with the reference answer, without contradicting any key facts."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material supports the claim that the `:has()` pseudo-class selects a parent element containing a specific child and provides an example that matches the given CSS rule."
+      },
+      "latency_ms": 28732.006400008686,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q02",
+        "question": "How do I add state to a React component?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Call the useState Hook at the top level of the component, e.g. const [count, setCount] = useState(0). It returns the current state and a set function that updates it and triggers a re-render.",
+        "expected_documents": [
+          "react/reference/react/useState.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": "To add state to a React component, use the `useState` Hook. This hook returns an array containing the current state value and a function to update it:\n\n```js\nconst [state, setState] = useState(initialState)\n```\n\n**Key rules:**\n- Hooks must be called unconditionally at the top level of your component or another Hook [2][3].\n- You cannot call `useState` inside conditions, loops, or nested functions; instead, extract those cases into a new component [3].\n- Each state variable is private to its component instance [4].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/reference/react/useState.md",
+          "react/learn/state-a-components-memory.md",
+          "react/learn/index.md",
+          "react/learn/state-a-components-memory.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that `useState` should be called at the top level of the component and provides the correct syntax. It also includes key rules that are consistent with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes how to use `useState` and correctly summarizes the key rules about Hooks, which are supported by the provided material."
+      },
+      "latency_ms": 11999.401499982923,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q03",
+        "question": "How do I declare a computed property with the Vue Composition API?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Import computed from vue and pass it a getter function, e.g. const message = computed(() => ...). It returns a computed ref (read with .value, auto-unwrapped in templates) that is cached and recomputed only when its reactive dependencies change.",
+        "expected_documents": [
+          "vue/guide/essentials/computed.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "vue"
+        ],
+        "notes": null
+      },
+      "answer": "To declare a computed property with the Vue Composition API, you use the `computed()` function and pass it a getter function that returns the value you want to compute. The result is a **computed ref**, which you access via `.value` in JavaScript or directly in template expressions (where it is auto-unwrapped).\n\n### Basic Example\n```vue\n<script setup>\nimport { computed } from 'vue'\n\nconst author = reactive({\n  name: 'John Doe',\n  books: ['Vue 2 - Advanced Guide']\n})\n\n// Declare a computed property\nconst publishedBooksMessage = computed(() => {\n  return author.books.length > 0 ? 'Yes' : 'No'\n})\n</script>\n\n<template>\n  <p>Has published books:</p>\n  <span>{{ publishedBooksMessage }}</span>\n</template>\n```\nIn this example, `publishedBooksMessage` is a computed ref. In the template, you can use it directly as `{{ publishedBooksMessage }}`, but in JavaScript code, you must access it as `publishedBooksMessage.value`.\n\n### With TypeScript (Optional Type Specification)\nYou can also specify an explicit return type using generics:\n```ts\nconst double = computed<number>(() => {\n  return count.value * 2\n})\n```\nThis ensures the getter returns a number and helps catch type errors at compile time.",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "vue/guide/typescript/composition-api.md",
+          "vue/guide/essentials/computed.md"
+        ],
+        [
+          "vue/guide/essentials/reactivity-fundamentals.md",
+          "vue/guide/extras/composition-api-faq.md",
+          "vue/guide/extras/reactivity-in-depth.md",
+          "vue/guide/extras/composition-api-faq.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes how to declare a computed property with the Vue Composition API, matches the reference answer's key facts, and does not contradict it."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material supports all claims in the answer, including the use of the `computed()` function to declare computed properties, the nature of the result as a computed ref, and the ability to specify an explicit type using generics."
+      },
+      "latency_ms": 23191.830400028266,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q04",
+        "question": "How do I create a dynamic route segment in the Next.js App Router?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Wrap a folder name in square brackets, e.g. app/blog/[slug]/page.js, where [slug] is the dynamic segment; its value is passed to the page, layout or route handler in the params prop.",
+        "expected_documents": [
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "nextjs"
+        ],
+        "notes": null
+      },
+      "answer": "To create a dynamic route segment in the Next.js App Router, wrap the folder name in square brackets (e.g., `[slug])` [2][3]. This allows you to generate routes from dynamic data like blog posts or product pages [4].\n\nThe captured values are passed to your page via the `params` prop, which is typically a Promise that resolves at request time [1][2].\n\nHere is an example of how to define and use it:\n\n```tsx filename=\"app/blog/[slug]/page.tsx\" switcher\nexport default async function BlogPostPage({\n  params,\n}: {\n  params: Promise<{ slug: string }>\n}) {\n  const { slug } = await params\n  // Use the slug to fetch data or render content\n  return <div>My Post: {slug}</div>\n}\n```\n\nYou can apply this pattern to any segment, such as `app/blog/[slug]/page.tsx` [3].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx",
+          "nextjs/01-getting-started/03-layouts-and-pages.mdx",
+          "nextjs/03-api-reference/03-file-conventions/dynamic-routes.mdx",
+          "nextjs/04-glossary.mdx"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that you need to wrap the folder name in square brackets for a dynamic route segment and mentions that the captured values are passed via the `params` prop. It also provides an example of how to define and use a dynamic route segment, which aligns with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes the process of creating dynamic route segments, the use of the `params` prop, and provides a correct example, all of which are supported by the provided material."
+      },
+      "latency_ms": 13050.797400006559,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q05",
+        "question": "What does the useState composable do in Nuxt?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "It creates a reactive, SSR-friendly shared state identified by a unique key, e.g. useState('counter', () => 0). The value is shared between components and kept from server rendering to hydration; because it is serialized to JSON, it must not contain classes, functions or symbols.",
+        "expected_documents": [
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": "The `useState` composable in Nuxt creates a **reactive and SSR-friendly shared state** across components [1][2]. It acts as an SSR-friendly replacement for `ref`, ensuring its value is preserved after server-side rendering (during client-side hydration) and shared uniquely by key [1].\n\nKey characteristics include:\n*   **Serialization:** Data inside `useState` is serialized to JSON, so it cannot contain non-serializable items like classes, functions, or symbols [1].\n*   **Access:** State data can be accessed via `payload.state.[name-of-your-state]` in Nuxt plugins [4].\n\n**Example usage:**\n```ts\nexport const useColor = () => useState<string>('color', () => 'pink')\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/2.directory-structure/1.app/1.composables.md",
+          "nuxt/4.api/2.composables/use-nuxt-app.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly identifies that `useState` in Nuxt creates a reactive and SSR-friendly shared state, and it mentions the serialization requirement. However, it incorrectly states that state data can be accessed via `payload.state.[name-of-your-state]` in Nuxt plugins, which is not accurate. The reference answer does not cover this point, so this part is not contradicted but is incorrect."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the provided material, including the definition of `useState`, its SSR-friendliness, serialization requirements, and example usage."
+      },
+      "latency_ms": 12088.204799976666,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q06",
+        "question": "What is a union type in TypeScript?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A type formed from two or more other types, written with |, such as number | string; a value may be any one of the member types. Only operations valid for every member are allowed until the value is narrowed.",
+        "expected_documents": [
+          "typescript/handbook-v2/Everyday Types.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "english",
+          "typescript"
+        ],
+        "notes": null
+      },
+      "answer": "A **union type** in TypeScript is a type formed from two or more other types, representing values that may be **any one** of those types [2]. Each of these constituent types is referred to as a union's **member**.\n\nYou can define a union type by combining types with the `|` separator. For example:\n```ts\nfunction printId(id: number | string) {\n  console.log(\"Your ID is: \" + id);\n}\n```\nThis function accepts either a `number` or a `string`.\n\n### Key Characteristics:\n1. **Definition**: A union type allows a variable to hold any value from the set of its members [2].\n   ```ts\n   let x: string | number; // Can be \"hello\" or 42\n   ```\n\n2. **Operations**: TypeScript only allows an operation if it is valid for **every** member of the union. For instance, you cannot call `.toUpperCase()` on `number | string` because numbers don't have this method [3].\n\n3. **Narrowing**: To work with specific members of a union, you can use type narrowing (e.g., via conditional checks) to deduce a more specific type [3].\n   ```ts\n   if (typeof x === \"string\") {\n     // Here, TypeScript knows x is definitely a string\n     console.log(x.toUpperCase());\n   }\n   ```\n\n4. **Common Properties**: If all members of a union share a common property or method, you can use it without narrowing [4].\n   ```ts\n   function getFirstThree(x: number[] | string) {\n     return x.slice(0, 3); // Both arrays and strings have .slice()\n   }\n   ```\n\nUnion types are useful for representing data that can take multiple distinct forms, such as `string | number` or complex shapes like:\n```ts\ntype Shape = \n  | { kind: \"circle\"; radius: number }\n  | { kind: \"square\"; x: number; y: number };\n```",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "typescript/reference/Utility Types.md",
+          "typescript/handbook-v2/Everyday Types.md",
+          "typescript/handbook-v2/Everyday Types.md",
+          "typescript/handbook-v2/Everyday Types.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes the concept of a union type in TypeScript, including its definition, operations, and characteristics, without contradicting the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the provided material."
+      },
+      "latency_ms": 15863.842099963222,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q07",
+        "question": "Hogyan kérek le adatot szerveroldalon Next.js App Routerben?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Server Componentben: a komponenst async függvénnyé kell alakítani, és abban await-tel meghívni a fetch API-t (vagy egy ORM-et, adatbázist), pl. export default async function Page() { const data = await fetch(...) }.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "hungarian",
+          "nextjs"
+        ],
+        "notes": "The Hungarian question of plan section 12.6, which missed the Fetching Data page before the English query rewrite. Expected documents list every page that answers the question; the API reference pages were added after the first run retrieved them."
+      },
+      "answer": "A Next.js App Routerben a szerveroldali adatlekérdezést **Server Components**-ként definiált komponensekben végezheted el, amelyek aszinkron függvények. A legegyszerűbb módja az, ha egy `async` és `await` kulcsszót használó `fetch()` API hívást írsz a komponensben [2].\n\nÍme egy példa arra, hogyan kérhetsz le adatot:\n\n```tsx\n// app/blog/page.tsx\nexport default async function Page() {\n  const data = await fetch('https://api.vercel.app/blog')\n  const posts = await data.json()\n  \n  return (\n    <ul>\n      {posts.map((post) => (\n        <li key={post.id}>{post.title}</li>\n      ))}\n    </ul>\n  )\n}\n```\n\nHa adatbázisra vagy ORM-re szeretnél lekérdezni, mivel a Server Components a szerveren futnak, biztonságosan használhatod az aszinkron adatbázis klienseket is [1][4].\n\nFontos megjegyezni, hogy a `fetch` kérések nem vannak alapértelmezetten cache-elve, és blokkolhatják az oldal renderelését, amíg befejeződnek. A teljesítményoptimalizálás érdekében használhatod a `<Suspense>` komponenset vagy a `use cache` irányítót [4].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nextjs/01-getting-started/06-fetching-data.mdx"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly describes how to fetch data on the server side using Server Components in Next.js App Router, and it includes an example code snippet that aligns with the reference answer. It also mentions the use of `fetch` and `async/await`, which are key points in the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that fetching data can be done using the `fetch` API in Server Components and provides a code example. It also mentions that database queries can be made safely in Server Components and references the need for proper caching and rendering optimization, which are supported by the provided material."
+      },
+      "latency_ms": 14552.162200037856,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q08",
+        "question": "Mire való a React useEffect hookja?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A useEffect egy React Hook, amellyel a komponenst egy külső rendszerrel szinkronizáljuk (pl. hálózat, böngésző API, harmadik féltől származó widget): a setup függvény a renderelés után fut, a cleanup függvény pedig a függőségek változásakor és a komponens eltávolításakor.",
+        "expected_documents": [
+          "react/reference/react/useEffect.md"
+        ],
+        "expected_intent": "single",
+        "tags": [
+          "single-hop",
+          "hungarian",
+          "react"
+        ],
+        "notes": null
+      },
+      "answer": "A `useEffect` hook egy React Hook, amely lehetővé teszi egy komponens szinkronizálását külső rendszerekkel [1]. A fő célja az alábbiakban említett területek kezelésére szolgál: hálózat, böngésző DOM, animációk, más UI könyvtár által írt widgetek és egyéb nem React kód kezelése [2].\n\nA hook alapvető használati formája a következő:\n```js\nuseEffect(setup, dependencies?)\n```\nEbben az esetben a `setup` függvény futtatása után egy lehetséges tiszteletlen (cleanup) függvényt is megadhatunk, amely leállítja vagy visszavonja a beindítás során indított folyamatokat [2].\n\nFontos megjegyezni, hogy:\n*   A `useEffect` csak komponens szintjén vagy saját Hookokban használható, nem lehet ciklusok vagy feltételek belsejében [3].\n*   Ha nem próbál szinkronizálni egy külső rendszert, valószínűleg nem szükséges Effect használat [2][3].\n*   Szigorú mód (Strict Mode) alatt React futtat egy extra beindítás-tisztítási ciklust fejlesztési célból, hogy ellenőrizze a tiszteletlen logika megfelelő működését [3].\n\nPélda a gyakorlati alkalmazásra:\n```js\nfunction ChatRoom({ roomId }) {\n  useEffect(() => {\n    const connection = createConnection(roomId);\n    connection.connect();\n    return () => connection.disconnect();\n  }, [roomId]);\n  // ...\n```\nEbben az esetben a `createConnection` és a kapcsolódás a külső rendszerhez tartozik, míg a tiszteletlen függvény biztosítja a csatlakozás lezárását [2].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/reference/react/useEffect.md",
+          "react/reference/react/hooks.md",
+          "react/reference/react/useEffect.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly identifies `useEffect` as a React Hook and describes its primary purpose. However, it includes additional details and examples that are not directly relevant to the question, such as the strict mode behavior and a specific use case example, which are not asked for in the question."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the provided material, including the definition, usage, caveats, and an example of `useEffect`."
+      },
+      "latency_ms": 14879.493099986576,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q09",
+        "question": "How do I fetch data on the server in Next.js and in Nuxt, and what is the difference?",
+        "history": [],
+        "expected_document_groups": [
+          [
+            "nextjs/01-getting-started/06-fetching-data.mdx",
+            "nextjs/03-api-reference/04-functions/fetch.mdx"
+          ],
+          [
+            "nuxt/1.getting-started/10.data-fetching.md",
+            "nuxt/4.api/3.utils/$fetch.md",
+            "nuxt/4.api/2.composables/use-fetch.md",
+            "nuxt/4.api/2.composables/use-async-data.md"
+          ]
+        ],
+        "reference_answer": "Next.js App Router: make a Server Component async and await fetch (or an ORM or database) in it. Nuxt: use the useFetch or useAsyncData composables (built on $fetch), which run on the server and forward the data to the client, so it is not fetched twice during hydration. The difference: Next.js fetches in async Server Components, Nuxt through composables in universal rendering.",
+        "expected_documents": [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nuxt/4.api/3.utils/$fetch.md",
+          "nuxt/4.api/2.composables/use-fetch.md",
+          "nuxt/4.api/2.composables/use-async-data.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "english",
+          "nextjs",
+          "nuxt"
+        ],
+        "notes": "Expected documents list every page that answers the question; the API reference pages were added after the first run retrieved them."
+      },
+      "answer": "In **Next.js**, you fetch data directly within your components by making them `async` functions and using either the native `fetch` API or an ORM/database query. This happens on the server side without needing separate hooks.\n\n*   **Method**: Turn the component into an `async` function and `await` the request.\n*   **Examples**:\n    *   Using `fetch`:\n        ```tsx\n        export default async function Page() {\n          const data = await fetch('https://api.vercel.app/blog')\n          const posts = await data.json()\n          return <ul>{posts.map((post) => <li key={post.id}>{post.title}</li>)}</ul>\n        }\n        ```\n    *   Using an ORM (e.g., Drizzle):\n        ```tsx\n        export default async function Page() {\n          const allPosts = await db.select().from(posts)\n          return <ul>{allPosts.map((post) => <li key={post.id}>{post.title}</li>)}</ul>\n        }\n        ```\n    [1][3][4]\n\nIn **Nuxt**, you use specific composables to handle data fetching, primarily `useFetch` or `useAsyncData`, because using `$fetch` directly can cause the data to be fetched twice (once on the server and once on the client).\n\n*   **Method**: Use `useFetch` for simplicity or `useAsyncData` for more control.\n*   **Examples**:\n    *   Using `useFetch`:\n        ```vue\n        <script setup lang=\"ts\">\n        const { data } = await useFetch('/api/item')\n        </script>\n        ```\n    *   Using `useAsyncData` with `$fetch`:\n        ```vue\n        <script setup lang=\"ts\">\n        const { data } = await useAsyncData('item', () => $fetch('/api/item'))\n        </script>\n        ```\n    [5][6][7]\n\n**Key Difference**:\nNext.js integrates fetching directly into the component logic via `async` functions, whereas Nuxt requires explicit composables (`useFetch`, `useAsyncData`) to manage the lifecycle of data across server-side rendering and client hydration, preventing duplicate fetches.",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/01-getting-started/06-fetching-data.mdx",
+          "nextjs/03-api-reference/04-functions/fetch.mdx",
+          "nextjs/01-getting-started/06-fetching-data.mdx"
+        ],
+        [
+          "nuxt/4.api/3.utils/$fetch.md",
+          "nuxt/3.guide/2.best-practices/performance.md",
+          "nuxt/1.getting-started/10.data-fetching.md",
+          "nuxt/4.api/3.utils/$fetch.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes how to fetch data in Next.js and Nuxt, and correctly identifies the key differences between the two approaches, without contradicting any of the reference answer's key points."
+      },
+      "complete_evidence_at_k": true,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material supports the claims about Next.js and Nuxt's data fetching methods, including the use of `async` functions and specific composables, and explains the differences in handling data fetching between the two frameworks."
+      },
+      "latency_ms": 17844.634400040377,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q10",
+        "question": "Mi a különbség a React useState és a Nuxt useState között?",
+        "history": [],
+        "expected_document_groups": [
+          [
+            "react/reference/react/useState.md"
+          ],
+          [
+            "nuxt/4.api/2.composables/use-state.md"
+          ]
+        ],
+        "reference_answer": "A React useState egy Hook, amely egy komponens saját állapotváltozóját adja vissza egy setter függvénnyel együtt ([state, setState]). A Nuxt useState egy kulccsal azonosított, SSR-barát, komponensek között megosztott reaktív állapot (ref), amely a szerveroldali renderelés után a kliensre is átkerül, ezért JSON-ba szerializálhatónak kell lennie.",
+        "expected_documents": [
+          "react/reference/react/useState.md",
+          "nuxt/4.api/2.composables/use-state.md"
+        ],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "hungarian",
+          "react",
+          "nuxt"
+        ],
+        "notes": null
+      },
+      "answer": "A fő különbség a **React** és a **Nuxt** `useState` között az, hogy a React-ben ez egy komponens-specifikus hook, míg a Nuxtonban egy globális, SSR-barát állapotkezelő kompozítható.\n\nÍme a részletek:\n\n*   **React useState**: Ez egy hook, amely lehetővé teszi az állapotváltozó hozzáadását egy adott komponenshez. Az adatok nem osztoznak meg több komponens között, és nem terveztek szerveroldali (SSR) elérésre.\n    ```js\n    const [state, setState] = useState(initialState)\n    ```\n    A logikát gyakran kinyerik egy saját custom hookba (pl. `useCounter`), de az állapot továbbra is a komponens szintjén marad [1][2][3].\n\n*   **Nuxt useState**: Ez egy kompozítható, amely létrehoz egy **reaktív és SSR-barát közös állapotot**. Az adatok szerializálódnak JSON-ba, így megmaradnak a szerveroldali renderelés után (SSR) és elérhetők minden komponensben egyetlen unikális kulccsal [5][6]. Fontos, hogy az állapot nem tartalmazhat olyan objektumokat, mint osztályok vagy függvények, mivel ezeket nem lehet JSON-ba serializálni [6].\n\n**Példa a Nuxt globális állapot használatára:**\n```ts\n// composables/states.ts\nexport const useColor = () => useState<string>('color', () => 'pink')\n\n// app/app.vue\n<script setup lang=\"ts\">\nconst color = useColor() // Globálisan elérhető állapot\n</script>\n```\nEzzel az adatot a szerveren és a kliensen is meg lehet érteni, míg a React `useState` csak a komponens életciklusában érvényes [5][6][7].",
+      "predicted_intent": "complex",
+      "retrieved_documents": [
+        [
+          "react/reference/react/useState.md",
+          "react/learn/reusing-logic-with-custom-hooks.md",
+          "react/reference/react/cloneElement.md",
+          "react/reference/react/cloneElement.md"
+        ],
+        [
+          "nuxt/4.api/2.composables/use-state.md",
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/1.getting-started/11.state-management.md",
+          "nuxt/4.api/2.composables/use-nuxt-app.md"
+        ]
+      ],
+      "intent_correct": true,
+      "hit_at_k": true,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "A válasz felsorolja a React useState és a Nuxt useState közötti kulcsfontosságú különbségeket, mint a referenciamegoldás is. Nem tartalmaz konkrét hibákat vagy ellentmondásokat a referenciamegoldás által adott információkhoz."
+      },
+      "complete_evidence_at_k": true,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The answer accurately describes the main differences between React and Nuxt `useState`, including that React `useState` is component-specific and not designed for SSR, while Nuxt `useState` is a composable that creates a reactive and SSR-friendly shared state. The provided examples and details align with the information given in the material."
+      },
+      "latency_ms": 17661.551099969074,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q11",
+        "question": "Is #777777 text on a white background readable enough for WCAG AA?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The contrast ratio is 4.47:1. It fails WCAG AA for normal text (at least 4.5:1) and passes only for large text (at least 3:1); it also fails AAA.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "contrast"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 4.47:1 for #777777 on #ffffff (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): fails\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): fails\n- AAA large text (at least 4.5:1): fails\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer states the key facts about the contrast ratio and WCAG AA compliance for the given text color and background, and it correctly identifies that the text fails for normal text but passes for large text."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All claims in the answer are directly supported by the material provided."
+      },
+      "latency_ms": 6890.981000033207,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q12",
+        "question": "Which selector has the higher specificity: `#nav a` or `.menu li a`?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "#nav a has specificity (1, 0, 1) and .menu li a has (0, 1, 2), so #nav a is more specific: one ID outweighs any number of classes and type selectors.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "specificity"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`css_specificity`):\n\n```text\nSpecificity (a, b, c): a counts ID selectors; b classes, attribute selectors and pseudo-classes; c type selectors and pseudo-elements.\n- `#nav a`: (1, 0, 1)\n- `.menu li a`: (0, 1, 2)\n`#nav a` has the highest specificity (1, 0, 1) and wins.\nSpecificity only decides between declarations of the same origin, importance and cascade layer: !important, layers and inline styles take precedence.\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states the specificity values for both selectors and concludes that `#nav a` is more specific, aligning with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The tool result exactly matches the content provided in the material."
+      },
+      "latency_ms": 6779.339900007471,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q13",
+        "question": "Is the :has() pseudo-class supported in Safari 15?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "No. Safari supports :has() from version 15.4, so Safari 15.0 does not support it.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "english",
+          "browser-support"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`browser_support`):\n\n```text\nBrowser support of css.selectors.has (MDN browser-compat-data):\n- Chrome: since 105\n- Edge: since 105\n- Firefox: since 121\n- Safari: since 15.4\n- Chrome Android: since 105\n- Safari on iOS: since 15.4\nSafari 15: not supported (added in 15.4).\nMDN: https://developer.mozilla.org/docs/Web/CSS/Reference/Selectors/:has\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 0.5,
+        "rationale": "The answer correctly states that Safari 15 does not support :has(), but it provides information about Safari 15.4 instead of Safari 15.0, which contradicts the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The tool result exactly matches the information provided in the material."
+      },
+      "latency_ms": 7088.491500006057,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q14",
+        "question": "Működik a `:has()` szelektor a Firefox 115-ben?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Nem. A Firefox a 121-es verziótól támogatja a :has() pszeudo-osztályt, így a 115-ös verzióban nem működik.",
+        "expected_documents": [],
+        "expected_intent": "tool",
+        "tags": [
+          "tool",
+          "hungarian",
+          "browser-support"
+        ],
+        "notes": null
+      },
+      "answer": "**Tool result** (`browser_support`):\n\n```text\nBrowser support of css.selectors.has (MDN browser-compat-data):\n- Chrome: since 105\n- Edge: since 105\n- Firefox: since 121\n- Safari: since 15.4\n- Chrome Android: since 105\n- Safari on iOS: since 15.4\nFirefox 115: not supported (added in 121).\nMDN: https://developer.mozilla.org/docs/Web/CSS/Reference/Selectors/:has\n```",
+      "predicted_intent": "tool",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer states that the :has() pseudo-class is not supported in Firefox 115, which aligns with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The tool result exactly matches the information provided in the material."
+      },
+      "latency_ms": 6881.7260000505485,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q15",
+        "question": "Melyik a nagyobb kontrasztú: fekete szöveg #f5f5f5 háttéren, vagy #595959 szöveg fehér háttéren? Megfelelnek a WCAG AA-nak?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "Fekete szöveg #f5f5f5 háttéren 19,26:1, #595959 szöveg fehér háttéren 7,0:1, tehát a fekete szöveg kontrasztja nagyobb. Mindkettő megfelel a WCAG AA-nak normál szövegnél is (legalább 4,5:1), sőt az AAA-nak (legalább 7:1) is.",
+        "expected_documents": [],
+        "expected_intent": "complex",
+        "tags": [
+          "multi-part",
+          "tool",
+          "hungarian",
+          "contrast"
+        ],
+        "notes": "Two contrast checks in one question: the planner should run the tool twice."
+      },
+      "answer": "A **fekete szöveg (#000000) #f5f5f5 háttéren** nagyobb kontrasztú (19,26:1), mint a #595959 szöveg fehér háttéren (7,00:1).\n\nMindkét páros megfelel a **WCAG AA** követelményeknek normál betűméretre (legalább 4,5:1 arány):\n- #f5f5f5 / #000000: 19,26:1\n- #595959 / #ffffff: 7,00:1\n\nMindkét eset AAA szintet is teljesít normál betűméretre (legalább 7:1 arány).\n\n**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 19.26:1 for #f5f5f5 on #000000 (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): passes\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): passes\n- AAA large text (at least 4.5:1): passes\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```\n\n**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 7.00:1 for #595959 on #ffffff (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): passes\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): passes\n- AAA large text (at least 4.5:1): passes\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```\n\n**Tool result** (`check_contrast`):\n\n```text\nContrast ratio 19.26:1 for #000000 on #f5f5f5 (WCAG 2.2, rounded down).\n- AA normal text (at least 4.5:1): passes\n- AA large text (at least 3:1): passes\n- AAA normal text (at least 7:1): passes\n- AAA large text (at least 4.5:1): passes\n- AA UI components and graphics (at least 3:1): passes\nLarge text is at least 24px, or at least 18.66px and bold.\n```",
+      "predicted_intent": "complex",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer states the key facts of the reference answer, including the contrast ratios, which contrast is greater, and that both meet WCAG AA standards. It does not contradict any of the reference answer's claims."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "All factual claims in the answer are directly supported by the material, including the contrast ratios, WCAG compliance levels, and the conditions for passing at different text sizes."
+      },
+      "latency_ms": 16068.038700032048,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q16",
+        "question": "Hi! What can you help me with?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "A short greeting that offers help with web frontend development questions, answered from the MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, and with contrast, specificity and browser-support checks.",
+        "expected_documents": [],
+        "expected_intent": "direct",
+        "tags": [
+          "direct",
+          "english"
+        ],
+        "notes": null
+      },
+      "answer": "Hi! I can assist you with frontend development questions based on the official documentation of MDN Web Docs (HTML, CSS, JavaScript, accessibility), React, Vue, Next.js, Nuxt, and TypeScript.",
+      "predicted_intent": "direct",
+      "retrieved_documents": [],
+      "intent_correct": true,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer states the key facts of the reference answer, including the areas of frontend development, the documentation sources, and the technologies mentioned, without contradicting any of them."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": null,
+      "latency_ms": 6927.223899983801,
+      "error": null
+    },
+    {
+      "item": {
+        "id": "q17",
+        "question": "What is the capital of France?",
+        "history": [],
+        "expected_document_groups": [],
+        "reference_answer": "The documentation does not cover this question; the assistant says so instead of answering from general knowledge.",
+        "expected_documents": [],
+        "expected_intent": null,
+        "tags": [
+          "out-of-scope",
+          "english"
+        ],
+        "notes": "Routing is not checked: a refusal on the direct route and a search that finds nothing are both acceptable."
+      },
+      "answer": "The provided documentation excerpts do not contain information about the capital of France. They only list countries and their IDs within a React state structure [1].",
+      "predicted_intent": "single",
+      "retrieved_documents": [
+        [
+          "react/learn/choosing-the-state-structure.md"
+        ]
+      ],
+      "intent_correct": null,
+      "hit_at_k": null,
+      "answer_correctness": {
+        "score": 1.0,
+        "rationale": "The answer correctly states that the documentation does not cover the question and does not attempt to provide an answer from general knowledge, aligning with the reference answer."
+      },
+      "complete_evidence_at_k": null,
+      "faithfulness": {
+        "score": 1.0,
+        "rationale": "The material only lists countries and their IDs within a React state structure and does not contain information about the capital of France."
+      },
+      "latency_ms": 10417.058799997903,
+      "error": null
+    }
+  ],
+  "scores": {
+    "complete_evidence_rate_at_k": {
+      "mean": 1.0,
+      "count": 2
+    },
+    "routing_accuracy": {
+      "mean": 1.0,
+      "count": 16
+    },
+    "hit_rate_at_k": {
+      "mean": 1.0,
+      "count": 10
+    },
+    "answer_correctness": {
+      "mean": 0.9117647058823529,
+      "count": 17
+    },
+    "faithfulness": {
+      "mean": 1.0,
+      "count": 16
+    }
+  },
+  "error_count": 0
+}

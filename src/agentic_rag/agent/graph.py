@@ -17,7 +17,8 @@ Wiring::
     plan_subtasks     --dispatch_subtasks--->  Send per sub-task: run_rag_subtask | call_tool
     run_rag_subtask   --> synthesize_answer
     call_tool         --> synthesize_answer
-    synthesize_answer --> verify_answer
+    synthesize_answer --route_after_synthesize--> finalize_response (exact single tool)
+                                              --> verify_answer (otherwise)
     verify_answer     --route_after_verify---> plan_subtasks          (insufficient and
                                                                        retry_count < max_retries)
                                            --> finalize_response      (otherwise)
@@ -34,7 +35,7 @@ an Ollama server that is still starting.
 
 Node convention, in both graphs: a node is a sync ``def`` whose only positional parameter is
 the state (or its ``Send`` payload) and which returns a ``dict`` partial update or ``None``.
-Its dependencies are keyword-only parameters without defaults, named so that they do not
+Its dependencies are keyword-only parameters, named so that they do not
 clash with the arguments LangGraph injects (``config``, ``runtime``, ``writer``, ``store``,
 ``previous``). The graph builder creates them once, binds them with ``functools.partial`` and
 registers each node under its explicit name; the ``Send`` workers also get
@@ -155,7 +156,9 @@ def build_agent_graph(
     )
     builder.add_edge("run_rag_subtask", "synthesize_answer")
     builder.add_edge("call_tool", "synthesize_answer")
-    builder.add_edge("synthesize_answer", "verify_answer")
+    builder.add_conditional_edges(
+        "synthesize_answer", routing.route_after_synthesize, ["finalize_response", "verify_answer"]
+    )
     builder.add_conditional_edges(
         "verify_answer",
         functools.partial(routing.route_after_verify, max_retries=settings.max_retries),

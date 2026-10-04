@@ -17,11 +17,12 @@ Intent = Literal["direct", "single", "complex", "tool"]
 - ``tool``: one non-retrieval tool call, sent straight to ``call_tool``.
 """
 
-Verdict = Literal["grounded", "insufficient"]
+Verdict = Literal["grounded", "insufficient", "unavailable"]
 """Outcome of ``verify_answer``.
 
 - ``grounded``: the draft answer is supported by the sub-task results.
 - ``insufficient``: unsupported or incomplete; re-plan while retries remain.
+- ``unavailable``: verification could not be parsed; do not claim grounding.
 """
 
 SubtaskKind = Literal["retrieve", "tool"]

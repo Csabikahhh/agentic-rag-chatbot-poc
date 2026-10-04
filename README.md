@@ -6,6 +6,8 @@ An agentic Retrieval-Augmented Generation (RAG) chatbot prototype in Python — 
 
 > **Status:** complete (2026-10-03): every phase of the [build order](docs/project-structure-plan.md#8-build-order) is done. A [frontend developer assistant](#problem-statement-and-motivation) over the official MDN, React, Vue, Next.js, Nuxt and TypeScript documentation, with three non-retrieval tools (decisions 8–9 of the [project structure plan](docs/project-structure-plan.md)): `agentic-rag ingest --download` downloads the documentation at pinned commits, cleans and chunks it and builds the vector index; the RAG subgraph rewrites a question into an English search query, retrieves and grades the chunks and returns a cited context; the main workflow routes every question, splits complex ones into parallel searches and tool calls (contrast, specificity, browser support), writes a cited answer and verifies it; the Streamlit UI shows every step live, the RAG subgraph's steps under each search, and the sources of the answer; `docker compose up --build` runs the whole stack from a fresh clone, downloading the model and the corpus and building the index on its own. A functional evaluation of 17 questions measures routing, retrieval, correctness and faithfulness, and a load test finds the bottleneck (see [Evaluation](#evaluation)). CI runs the lint, the offline tests and the image build on every push.
 
+> **RAG reliability update (2026-10-04):** hybrid BM25/vector retrieval now considers 20 candidates and keeps up to four relevant chunks. Malformed verification withholds the draft; exact single-tool answers skip two model calls. Citations link to their sources and show indexed snapshot metadata after re-ingestion. A separate 24-question holdout and a complete-evidence metric extend the evaluation. Re-measured with the same models as the 3 October baseline: retrieval hit@4 0.90 → 1.00, faithfulness 0.94 → 1.00, correctness 0.91 as before (the two half-points it lost are judge errors), the same throughput; the holdout shows where the system still fails (see [Evaluation](#evaluation)). Details and migration: [docs/rag-improvements.md](docs/rag-improvements.md).
+
 ## Contents
 
 1. [Overview](#overview)
@@ -107,9 +109,9 @@ flowchart LR
 The parts that are built:
 
 - **Ingestion pipeline:** `data/sources.toml` → sparse git download at pinned commits → dialect cleaning and one document per H2/H3 section → structure-aware chunks with a context line → Chroma, where only new or changed chunks are embedded.
-- **RAG subgraph** (`rewrite_query` → `retrieve` → `grade_documents` → `build_context`, linear): the chat model rewrites the question into one English search query, Chroma returns the `TOP_K` closest chunks, a score threshold and one LLM grading call drop the irrelevant ones, and the rest becomes a context with the citation markers `[1]`, `[2]`, … and the matching sources. Every step records a trace event with its duration and a one-line summary.
+- **RAG subgraph** (`rewrite_query` → `retrieve` → `grade_documents` → `build_context`, linear): the chat model rewrites the question into one English search query; Chroma and a local BM25 keyword index rank the chunks, and reciprocal-rank fusion keeps `RETRIEVAL_CANDIDATES` (20) candidates; a score threshold for the vector-only hits and one LLM grading call drop the irrelevant ones, and up to `TOP_K` (4) of the rest become a context with the citation markers `[1]`, `[2]`, … and the matching sources. Every step records a trace event with its duration and a one-line summary.
 
-- **Main workflow** (seven nodes): `analyze_request` classifies the message (`direct`, `single`, `tool`, `complex`); a single question goes straight to one search, a tool question to one tool call, and a complex one to `plan_subtasks`, which plans up to five independent sub-tasks that LangGraph runs in parallel (`Send`); `synthesize_answer` writes a cited answer from the results, `verify_answer` checks it and re-plans what is missing at most `MAX_RETRIES` times, and `finalize_response` returns the answer, its numbered sources and the verbatim tool outputs.
+- **Main workflow** (seven nodes): `analyze_request` classifies the message (`direct`, `single`, `tool`, `complex`); a single question goes straight to one search, a tool question to one tool call, and a complex one to `plan_subtasks`, which plans up to five independent sub-tasks that LangGraph runs in parallel (`Send`); `synthesize_answer` writes a cited answer from the results (after a single successful deterministic tool call it makes no model call and the verification is skipped: the exact tool output is the answer), `verify_answer` checks it and re-plans what is missing at most `MAX_RETRIES` times (a verification that cannot be read withholds the draft), and `finalize_response` returns the answer, its numbered sources and the verbatim tool outputs.
 - **Tools:** `search_knowledge_base` (the RAG subgraph), `check_contrast` (WCAG 2.2 contrast), `css_specificity` (Selectors Level 4) and `browser_support` (MDN browser-compat-data, pinned).
 
 The detailed design (the seven main nodes and their routing, the four steps of the RAG subgraph with their prompts and thresholds, the ingestion pipeline, the tools), the state contracts as they exist in the code, the cross-cutting contracts (dependency injection, the execution model, trace events, the re-plan loop, citation numbering, errors and exit codes) and the configuration reference are in [docs/architecture.md](docs/architecture.md).
@@ -129,13 +131,14 @@ Decisions 1–7 of the [project structure plan](docs/project-structure-plan.md#3
 | LLM serving | Setup effort, containerization, throughput | **Ollama** (a Compose service, or Ollama on the host) plus a **scripted fake provider**: Ollama gives an HTTP API and GPU support without compiling anything into the image; the fake (`LLM_PROVIDER=fake`) is the brief's dummy LLM and keeps the tests model-free |
 | Tool-calling style | Reliability with small local models vs. flexibility of native tool calling | **Structured-output planner + explicit tool nodes**: the planner emits typed sub-tasks as JSON, which small local models produce more reliably than native tool calls; the tools stay LangChain tools, so `bind_tools` remains possible |
 | Embedding model | Retrieval quality vs. speed; language coverage | **`intfloat/multilingual-e5-small`**, provisional, run locally with sentence-transformers: multilingual (Hungarian included) and small (384 dimensions), so it runs on the CPU and leaves the GPU to the LLM |
-| Retrieval and grading | Recall vs. precision; latency of extra LLM calls; Hungarian questions over an English corpus | **Rewrite, search, threshold, LLM grade** (Phase 3): the chat model rewrites every question into one English search query (the multilingual embeddings alone missed Hungarian questions, see *Cross-lingual retrieval* below); Chroma returns the `TOP_K` (4) closest chunks; a score threshold per embedding provider (0.83 for E5, measured on the index) drops what is clearly unrelated; one structured-output call grades the remaining chunks together, so the cost is one LLM call per retrieval, not one per chunk, and `GRADE_WITH_LLM=false` turns it off. Measured warm with Ollama: rewrite 100–180 ms, grade 290–360 ms, search 10–20 ms |
+| Retrieval and grading | Recall vs. precision; latency of extra LLM calls; Hungarian questions over an English corpus | **Rewrite, hybrid search, threshold, LLM grade** (Phase 3; hybrid since the RAG reliability update): the chat model rewrites every question into one English search query (the multilingual embeddings alone missed Hungarian questions, see *Cross-lingual retrieval* below); Chroma and a BM25 keyword index over the same chunks (SQLite FTS5, built in memory on the first search, no extra model) each rank the chunks, and reciprocal-rank fusion keeps 20 candidates (`RETRIEVAL_CANDIDATES`); a score threshold per embedding provider (0.83 for E5, measured on the index) drops vector-only hits that are clearly unrelated; one structured-output call grades the remaining chunks together, so the cost is one LLM call per retrieval, not one per chunk (`GRADE_WITH_LLM=false` turns it off); up to `TOP_K` (4) relevant chunks are kept. The keyword ranking finds the one page the vectors missed (hit@4 0.90 → 1.00); the longer candidate list makes the grading call slower. Measured with Qwen3.5-4B, one request at a time: rewrite 0.31 s (median), grade 0.26 s with 4 candidates and 0.48 s with 20, search 20 ms. `HYBRID_SEARCH=false RETRIEVAL_CANDIDATES=4` restores the vector-only search |
 | Vector store | Persistence, metadata filtering, scalability | **Chroma** with a persistent client in `data/chroma_db/` (a named volume in Compose): persistence and metadata filtering without pickle deserialization |
 | Chunking | Chunk size and overlap vs. retrieval precision and context length | **Structure-aware:** the loaders split every page at its H2 and H3 headings, and the heading path becomes the `section` metadata. Each section is packed into chunks of up to 900 characters at paragraph boundaries; a code block stays whole up to 1 800 characters, a heading never ends a chunk, and short trailing paragraphs (up to 150 characters) are repeated in the next chunk. Every chunk starts with a context line of title and headings (`useState – React > Reference > useState(initialState)`), so a chunk such as *Parameters* still names its subject for the embedding model and the prompt. Result: 18 654 chunks from 1 160 pages, median 602 characters. The evaluation (Phase 7) measured a retrieval hit@4 of 0.90 with these sizes; its one miss is a ranking problem, not a chunking one |
 
 Notes on the defaults:
 
-- **Models.** The LLM was chosen with the evaluation and the load test (decision 4, above). The embedding model stays the provisional default of decision 5: the evaluation finds the right page for 9 of 10 questions in both languages with it, and its one miss is a ranking problem that a larger embedding model or a hybrid keyword search could address. The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus.
+- **Models.** The LLM was chosen with the evaluation and the load test (decision 4, above). The embedding model stays the provisional default of decision 5: with it alone the evaluation found the right page for 9 of 10 questions in both languages, and its one miss, a ranking problem, is fixed by the hybrid keyword search of the RAG reliability update (10 of 10). The documentation is in English and the questions may be Hungarian or English, so the evaluation set also checks Hungarian questions over the English corpus.
+- **Model builds.** The evaluation and the load test ran with the `qwen3.5:4b` build `2a654d98e6fb` (pulled on 2026-08-27) and the judge `hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M` (`eb180556ed65`). Ollama tags are mutable: on 2026-10-04 a fresh `ollama pull qwen3.5:4b`, as in the Compose stack, got the build `d8b0f5e9760c`, repackaged with a separate vision projector; it answered the smoke-test question correctly but is not the measured build. `ollama list` shows which build a server has.
 - **Corpus scope.** The framework documentation mixes versions and legacy sections. The source list keeps the current guides and API references, such as the App Router of Next.js, and leaves out the Pages Router, Nuxt Bridge, the migration guides and MDN's vendor-prefixed selectors: 1 160 pages (MDN 573, Nuxt 172, Next.js 165, React 151, Vue 80, TypeScript 19). Every source is stored in a directory of its own under `data/raw/` (`mdn/`, `react/`, `vue/`, `nextjs/`, `nuxt/`, `typescript/`), and its name is added to every page title (`useState – React`, `useState – Nuxt`), so every citation shows which documentation it comes from, and APIs of the same name stay apart.
 - **Cleaning.** Each documentation set writes Markdown in its own dialect. The loaders turn MDN's macros, the JSX components of React and Next.js, Vue's VitePress containers and Nuxt's MDC components into plain Markdown, drop the Pages Router blocks of the Next.js pages, replace links by their text, and keep every code block verbatim (details in `src/agentic_rag/ingestion/markdown.py`).
 - **Cross-lingual retrieval.** A first check on the built index confirms the risk of a Hungarian question over an English corpus. English questions find the right page: *Which CSS pseudo-class selects a parent element that contains a specific child?* returns MDN's `:has()` first, and *How do I add state to a React component?* returns the state sections of `Component` and `useState`. The Hungarian question *Hogyan kérek le adatot szerveroldalon Next.js App Routerben?* ("How do I fetch data on the server in the Next.js App Router?") does not reach the *Fetching Data* page in the top three. The `rewrite_query` step of the RAG subgraph (Phase 3) therefore turns every question into an English search query before retrieval. With it, the question becomes *How do I fetch data on the server in Next.js App Router?* and retrieves the *Fetching Data* page; *How do I create a dynamic route in the Next.js App Router?*, which first found a React page, becomes *next.js app router dynamic route* and finds *Dynamic Route Segments*. The evaluation (Phase 7) confirms it on more questions: the Hungarian questions retrieve the right pages as often as the English ones.
@@ -146,31 +149,39 @@ Notes on the defaults:
 
 ### Functional evaluation
 
-**Set:** 17 questions over the documentation in [data/eval/questions.jsonl](data/eval/questions.jsonl): 8 single searches across the six sources, 3 multi-part questions, 4 tool questions, a greeting and a question outside the topic; 5 of them in Hungarian. Each has a reference answer, the documents that answer it and the expected route ([data/eval/README.md](data/eval/README.md)).
+**Set:** 17 questions over the documentation in [data/eval/questions.jsonl](data/eval/questions.jsonl): 8 single searches across the six sources, 3 multi-part questions, 4 tool questions, a greeting and a question outside the topic; 5 of them in Hungarian. Each has a reference answer, the documents that answer it and the expected route ([data/eval/README.md](data/eval/README.md)). A separate **holdout** of 24 questions, [data/eval/holdout.jsonl](data/eval/holdout.jsonl), is kept out of development: follow-ups with a fixed conversation history, Hungarian questions, framework ambiguity, version boundaries, an API that does not exist and mixed tool and search requests. Its reference answers are drafts that a domain expert has not reviewed yet.
 
-**Metrics:** routing accuracy, retrieval hit@4 (per retrieve sub-task, after grading), and answer correctness and faithfulness judged by a local LLM, which picks one of three verdicts (1, 0.5 or 0). `agentic-rag eval` runs the full graph, or one node: `--node analyze_request` for routing alone, `--node run_rag_subtask` for retrieval alone. Every run writes a JSON report and a Markdown summary to `data/eval/results/`.
+**Metrics:** routing accuracy, retrieval hit@4 (per retrieve sub-task, after grading), complete evidence@4 (a comparison needs a hit for every framework it asks about), and answer correctness and faithfulness judged by a local LLM, which picks one of three verdicts (1, 0.5 or 0). `agentic-rag eval` runs the full graph, or one node: `--node analyze_request` for routing alone, `--node run_rag_subtask` for retrieval alone. Every run writes a JSON report and a Markdown summary to `data/eval/results/`.
 
 **Results** (mean of three runs each, RTX 5070 Laptop GPU, Qwen2.5-7B as the judge in every run):
 
 | Model | Routing | hit@4 | Correctness | Faithfulness | Hungarian correctness | Median latency |
 |---|---|---|---|---|---|---|
 | `qwen2.5:7b-instruct` (the former default) | 0.88 | 0.90 | 0.88 | 0.91 | 0.80 | 8.4 s |
-| `qwen3.5:4b`, thinking off (the default since Phase 8) | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 12 s (inflated by the judge's model swaps; 3.6 s in the load test) |
+| `qwen3.5:4b`, thinking off (default since Phase 8), 3 October | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 12 s (inflated by the judge's model swaps; 3.6 s in the load test) |
 | `qwen3.5:4b`, thinking on (one run) | 1.00 | 0.90 | 0.91 | 0.94 | 0.90 | 143 s |
+| `qwen3.5:4b`, thinking off, **RAG reliability update**, 4 October | 1.00 | **1.00** | 0.91 | **1.00** | 0.90 | 13 s (inflated as above; 3.9 s in the load test) |
+
+Complete evidence@4 is 1.00 in every run, before the update too (recomputed from the stored rankings): the planner gives each framework of a comparison its own search. The three runs of a Qwen3.5 configuration give identical scores.
+
+**Holdout** (one run, the same models and judge): routing 0.94, hit@4 0.81, complete evidence@4 1.00, correctness 0.67, faithfulness 0.73. A manual review of the answers scored below 1 finds three judge errors (two exact tool outputs and a correct refusal, all scored 0; correctness 0.79 without them) and real failures that the development set does not provoke: questions across a version boundary (Nuxt 2, the Next.js Pages Router) answered with unsupported details, a framework-ambiguous question answered for one framework instead of asking, a wrong explanation of how React batches state updates, and an English question answered in Hungarian.
 
 **Conclusions:**
 
-- The workflow does what it is built for: retrieval finds the right page for 9 of 10 questions in both languages, the out-of-scope question is declined, and the tools give exact verdicts, shown verbatim in every answer.
+- The workflow does what it is built for: retrieval finds the right page for every question of the development set in both languages, the out-of-scope question is declined, and the tools give exact verdicts, shown verbatim in every answer.
 - With the former default, the 7B model, the weak points were the routing of tool questions (two of five go to a search or to a single tool call; the verifier repairs most of these) and Hungarian answers (0.12 lower correctness, 0.20 lower faithfulness than English).
 - `qwen3.5:4b` with thinking off fixes both and is stable from run to run; after the load test confirmed it, it became the default (decision 4).
+- The RAG reliability update keeps every score and improves two: the keyword ranking finds the page the vectors missed (hit@4 1.00; with `HYBRID_SEARCH=false RETRIEVAL_CANDIDATES=4` the same code still misses it), and every answer is faithful (1.00). Correctness stays at 0.91 because the judge gave half a point to two correct answers: one adds a detail that is verbatim in the Nuxt documentation, the other is the exact `browser_support` output.
+- The holdout is harder than the development set and shows the next work: answers across version boundaries, a clarifying question for ambiguous requests, and the answer language; the judge also needs care with short exact answers.
 - The evaluation found and fixed defects first: an out-of-scope question answered from general knowledge, a two-contrast question that invented its ratios after a failed tool call, mislabelled tool outputs, and a judge that rewarded both.
 
-[docs/evaluation.md](docs/evaluation.md) has the details: the question-by-question findings, a manual review of the judge (it agrees with 15 of 17 verdicts and errs on the strict side), the fixes and the limitations. To reproduce:
+[docs/evaluation.md](docs/evaluation.md) has the details: the question-by-question findings, a manual review of the judge (it agrees with 15 of 17 verdicts of the first run and errs on the strict side; its errors after the update and on the holdout are listed too), the fixes and the limitations. To reproduce:
 
 ```bash
 uv run agentic-rag eval                                         # full graph, with the model and judge of OLLAMA_MODEL
 uv run agentic-rag eval --target node --node analyze_request     # routing alone
 OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-model qwen2.5:7b-instruct
+uv run agentic-rag eval --dataset data/eval/holdout.jsonl --judge-model qwen2.5:7b-instruct   # the holdout
 ```
 
 ### Load test & bottleneck analysis
@@ -187,13 +198,15 @@ OLLAMA_MODEL=qwen3.5:4b OLLAMA_REASONING=false uv run agentic-rag eval --judge-m
 | `qwen3.5:4b`, one request at a time (50 requests) | 1 | 11.5 / min | 3.6 s | 14.9 s |
 | `qwen2.5:7b-instruct`, Ollama with 4 parallel slots | 4 | 20.0 / min | 10.3 s | 25.0 s |
 | `qwen3.5:4b` without the LLM grading | 4 | 10.7 / min | 18.2 s | 41.4 s |
+| `qwen3.5:4b`, **RAG reliability update** | 4 | 12.0 / min | 20.4 s | 39.7 s |
+| `qwen3.5:4b`, **RAG reliability update**, one request at a time (50 requests) | 1 | 11.7 / min | 3.9 s | 12.9 s |
 
-**Bottleneck:** LLM inference on a server that runs one request at a time. A request makes 5.3 LLM calls on average, which take 99 % of its time; the retrieval takes 20 ms, the tools and the orchestration milliseconds. From one to four concurrent requests the throughput grows by only 6 % while the median latency grows fivefold, because every call waits in Ollama's queue; the GPU is busy all the time.
+**Bottleneck:** LLM inference on a server that runs one request at a time. A request makes 5.3 LLM calls on average, which take 99 % of its time; the retrieval takes 20 ms, the tools and the orchestration milliseconds. From one to four concurrent requests the throughput grows by only 6 % while the median latency grows fivefold, because every call waits in Ollama's queue; the GPU is busy all the time. The RAG reliability update leaves the bottleneck where it is: a request makes about 4.7 LLM calls instead of 5.3, because exact tool answers skip the answer and its verification, but the grading call reads up to 20 candidates instead of 4. For one user the median is 3.9 s (3.6 s before) and the p95 12.9 s (14.9 s); with four, the throughput is unchanged (12.0 against 12.2 per minute) while the median grows by 16 % (20.4 s against 17.6 s), because the longer prompts wait in the same queue.
 
 **Proposals:**
 
 1. **Parallel decoding slots with a model that batches** (measured): `OLLAMA_NUM_PARALLEL=4` doubles the throughput of the 7B transformer (20.0 against 9.5 per minute) and cuts its p95 by 57 %, at the cost of VRAM; Ollama does not batch Qwen3.5's hybrid architecture, so for it the setting changes nothing. A deployment for several users should therefore choose the model together with the serving stack (parallel slots, or continuous batching on a larger GPU).
-2. **Fewer and shorter calls on the critical path:** writing the answer is half of the service time, the verification and its re-plans a fifth. Streaming the answer to the UI and skipping the verification of tool answers, which are shown verbatim anyway, cut what the user waits for. Dropping the relevance grading does not help: it was measured slower (10.7 against 12.2 per minute), because more chunks reach the answer prompt.
+2. **Fewer and shorter calls on the critical path:** writing the answer is half of the service time, the verification and its re-plans a fifth. Skipping the verification of exact tool answers is now built and measured: 0.86 verifications per request instead of 1.14, and the tool questions of the evaluation take about 7 s instead of 9.5 s. Streaming the answer to the UI is still open. The candidate pool is the new lever: a smaller `RETRIEVAL_CANDIDATES` shortens the grading prompt (not measured yet; 4 restores the old latency but also the missed page). Dropping the relevance grading does not help: it was measured slower (10.7 against 12.2 per minute), because more chunks reach the answer prompt.
 
 [docs/performance.md](docs/performance.md) has the per-node breakdown, the micro-benchmark of the parallel slots and the commands. To reproduce the main run:
 
@@ -431,6 +444,7 @@ The details are in [docs/architecture.md](docs/architecture.md#errors-and-exit-c
 agentic-rag-chatbot-poc/
 ├── .claude/                        # Claude Code agents and skills used while building the project
 ├── .github/workflows/ci.yml        # CI: lint, format check, offline tests, image build
+├── .streamlit/config.toml          # the UI theme (PwC-inspired colours, Georgia and Arial); no secrets
 ├── data/
 │   ├── README.md                   # data layout, corpus rules, when to rebuild the index
 │   ├── sources.toml                # the corpus sources: repositories, pinned commits, patterns, licenses
@@ -438,13 +452,20 @@ agentic-rag-chatbot-poc/
 │   │                               #   browser-compat-data of the browser_support tool; gitignored
 │   └── eval/
 │       ├── README.md               # evaluation question-set schema and report formats
+│       ├── questions.jsonl         # the development set: 17 questions
+│       ├── holdout.jsonl           # the holdout: 24 questions kept out of development
 │       └── results/                # committed evaluation and load-test reports (JSON and Markdown)
 ├── docs/
 │   ├── architecture.md             # target graphs, state and cross-cutting contracts, configuration reference
 │   ├── evaluation.md               # functional evaluation: method, results, model comparison, conclusions
 │   ├── performance.md              # load test: results, per-node breakdown, bottleneck, proposals
+│   ├── rag-improvements.md         # the RAG reliability update: changes, measurements, migration
+│   ├── developer-guide.en.md       # developer guide, one chapter per page (source of the PDF)
+│   ├── developer-guide.hu.md       # the developer guide in Hungarian
+│   ├── build_developer_pdfs.py     # builds both PDFs (ReportLab; document tooling only)
 │   ├── project-structure-plan.md   # repository plan and build order
 │   └── project-structure-plan.hu.md  # the plan in Hungarian
+├── output/pdf/                     # developer-guide-en.pdf and developer-guide-hu.pdf, built from docs/
 ├── src/
 │   └── agentic_rag/
 │       ├── __init__.py             # package version
@@ -470,6 +491,7 @@ agentic-rag-chatbot-poc/
 │       ├── rag/                    # RAG subgraph: rewrite, retrieve, grade, build the cited context
 │       │   ├── state.py            # RagState, RagInput, RagOutput, Source (implemented contracts)
 │       │   ├── nodes.py            # rewrite_query · retrieve · grade_documents · build_context, prompts
+│       │   ├── lexical.py          # BM25 keyword search (SQLite FTS5) and reciprocal-rank fusion
 │       │   └── graph.py            # RAG_NODE_NAMES, MIN_SCORES and build_rag_graph()
 │       ├── ingestion/              # ingestion pipeline: download, clean, chunk, embed and store
 │       │   ├── sources.py          # the source list, glob patterns, manifests and page URLs
@@ -500,6 +522,8 @@ agentic-rag-chatbot-poc/
 │   ├── test_llm.py                 # provider selection, scripted fake; live Ollama check (marker `ollama`, deselected by default)
 │   ├── test_loadtest.py            # percentiles, run_load_test on a small index, the report and its summary
 │   ├── test_rag_subgraph.py        # RAG nodes with stand-ins; the compiled subgraph on a small index
+│   ├── test_rag_improvements.py    # reliability update: keyword index and fusion, grading pool, tool fast
+│   │                               #   path, verification fallback, evidence groups, citations, holdout
 │   ├── test_state.py               # state contracts and reducers
 │   ├── test_tools.py               # contrast, specificity, browser support and the tool layer
 │   ├── test_tracing.py             # step-trace primitives
